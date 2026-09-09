@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Dados (grandes / gerados — nunca versionar)
+data/raw/
+data/processed/
+*.parquet
+*.csv
+
+# Credenciais
+kaggle.json
+.env
+*.env
+
+# Azure / Terraform / Bicep state (se vierem a existir)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# macOS
+.DS_Store
