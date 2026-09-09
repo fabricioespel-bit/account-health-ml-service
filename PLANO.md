@@ -118,6 +118,37 @@ verificada, validar as dependências externas que podem mudar o caminho do proje
   (b) estimativa de custo/hora do node pool e mecanismo de desligamento definido, (c) ambiente Azure
   pronto (assinatura, CLI, resource group, ADLS Gen2, Synapse Serverless), (d) acesso ao Kaggle confirmado.
 
+**Status da Fase -1 (atualizado em 09/set/2026):**
+
+- ✅ Assinatura Azure ativa — avaliação gratuita (US$ 200/30 dias), conta pessoal limpa
+  (`fabricioespel80@outlook.com`, tenant "Default Directory", sem nenhum vínculo com a Hagens — ver nota
+  abaixo sobre o problema de tenant encontrado durante o setup).
+- ✅ Repositório `account-health-ml-service` criado e publicado em
+  `github.com/fabricioespel-bit/account-health-ml-service`.
+- ✅ Acesso ao Kaggle confirmado — API Token (formato novo, não legacy) gerado e validado via
+  `uv run kaggle competitions list`; regras da competição KKBox Churn Prediction aceitas no site.
+- ✅ **AKS Automatic confirmado disponível** para a assinatura ("Azure subscription 1") na região **East US** —
+  validado pelo Portal (Centro do Kubernetes → Criar → "Cluster automático do Kubernetes"), formulário abriu
+  sem nenhum aviso de indisponibilidade com a assinatura e a região pré-selecionadas. **Decisão: seguir com
+  AKS Automatic em East US na Fase 3**, sem necessidade do fallback (AKS padrão + cluster autoscaler).
+- ⏳ Azure CLI (`az`) — instalação via Homebrew em andamento (build local de dependências como
+  `llvm@22`/`rust`, demorada por serem compiladas a partir do código-fonte).
+- ⬜ Custo do node pool do AKS + mecanismo de desligamento automatizado — ainda não definido.
+- ⬜ Resource Group dedicado — ainda não criado.
+- ⬜ ADLS Gen2 (bronze/silver/gold) + workspace Synapse Serverless — ainda não provisionados.
+
+**Nota sobre o setup da conta Azure (09/set/2026):** a primeira tentativa de criar a conta Azure com o
+e-mail pessoal (`fabricioespel@gmail.com`) resultou no tenant caindo dentro do Microsoft Entra ID da
+Hagens ("HAGENS MARKETING LTDA"), porque esse e-mail já era convidado (guest) nesse diretório — sem
+nenhuma assinatura própria nele, e sem permissão de guest para criar um novo tenant a partir daquele
+contexto (serviço de criação de locatário não aparecia disponível na busca do Portal). Resolvido criando
+uma conta Microsoft nova (`fabricioespel80@outlook.com`, sem vínculo prévio com nenhum tenant
+corporativo) e refazendo o cadastro da assinatura a partir dela — gerou um "Default Directory" pessoal
+automaticamente, limpo. Lição registrada: ao usar um e-mail pessoal que já teve qualquer relação de
+convidado com um tenant corporativo (Teams, SharePoint, M365 etc.), o cadastro do Azure pode herdar esse
+contexto em vez de criar um diretório novo — vale verificar o diretório ativo (canto superior direito do
+Portal) logo após criar a conta.
+
 ### Fase 0 — Data lake simplificado, dados e definição de sucesso (revisada, 08/set/2026)
 
 - **Ingestão (bronze):** baixar a amostra de contas do KKBox (transactions, user_logs, members — ver seção
@@ -227,7 +258,9 @@ de verdade.
 ADLS Gen2 — não a arquitetura completa de um data warehouse, mas também não mais "tudo em SQL direto".
 - Trade-off de custo: gestão do node pool do AKS entre sessões de uso (reduzir/desligar quando não estiver
 ativamente demonstrando o projeto) — mecanismo automatizado, não dependência de lembrar manualmente.
-- **(Novo)** Resultado da validação de AKS Automatic feita na Fase -1: disponível ou fallback, e por quê.
+- **(Novo)** Resultado da validação de AKS Automatic feita na Fase -1: **disponível** para a assinatura na
+  região East US (validado em 09/set/2026 pelo Portal) — decisão de seguir com AKS Automatic, sem
+  necessidade do fallback padrão. Detalhe completo do teste na seção 3 (Fase -1, status).
 - **(Novo, 08/set/2026)** Por que KKBox (dado real de uso+billing) combinado com suporte sintético
   correlacionado, em vez de 100% sintético ou tentar forçar dois datasets reais sem `account_id` em comum
   — lacuna real de dado público disponível, documentada explicitamente, não escondida.
