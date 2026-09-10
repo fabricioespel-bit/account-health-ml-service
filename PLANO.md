@@ -120,9 +120,14 @@ verificada, validar as dependências externas que podem mudar o caminho do proje
 
 **Status da Fase -1 (atualizado em 09/set/2026):**
 
-- ✅ Assinatura Azure ativa — avaliação gratuita (US$ 200/30 dias), conta pessoal limpa
-  (`fabricioespel80@outlook.com`, tenant "Default Directory", sem nenhum vínculo com a Hagens — ver nota
-  abaixo sobre o problema de tenant encontrado durante o setup).
+- ✅ Assinatura Azure ativa — **Pay-As-You-Go** (não foi possível ativar a avaliação gratuita de US$ 200;
+  a conta exigiu assinatura paga diretamente), conta pessoal limpa (`fabricioespel80@outlook.com`, tenant
+  "Default Directory", sem nenhum vínculo com a Hagens — ver nota abaixo sobre o problema de tenant
+  encontrado durante o setup). **Sem crédito gratuito de margem — todo gasto é cobrança real no cartão.**
+- ✅ Budget configurado no Azure Cost Management: **US$ 10**, com alertas em 50%, 80% e 100%
+  (US$ 5 / US$ 8 / US$ 10) — rede de segurança contra gasto inesperado, complementar ao `az aks stop`/
+  `az aks start` que será adotado como rotina de desligamento entre sessões na Fase 3. Valor baixo de
+  propósito (ainda sem dado real de custo/hora do node pool); ajustar depois de observar o gasto real.
 - ✅ Repositório `account-health-ml-service` criado e publicado em
   `github.com/fabricioespel-bit/account-health-ml-service`.
 - ✅ Acesso ao Kaggle confirmado — API Token (formato novo, não legacy) gerado e validado via
@@ -131,10 +136,18 @@ verificada, validar as dependências externas que podem mudar o caminho do proje
   validado pelo Portal (Centro do Kubernetes → Criar → "Cluster automático do Kubernetes"), formulário abriu
   sem nenhum aviso de indisponibilidade com a assinatura e a região pré-selecionadas. **Decisão: seguir com
   AKS Automatic em East US na Fase 3**, sem necessidade do fallback (AKS padrão + cluster autoscaler).
-- ⏳ Azure CLI (`az`) — instalação via Homebrew em andamento (build local de dependências como
-  `llvm@22`/`rust`, demorada por serem compiladas a partir do código-fonte).
-- ⬜ Custo do node pool do AKS + mecanismo de desligamento automatizado — ainda não definido.
-- ⬜ Resource Group dedicado — ainda não criado.
+- ✅ Azure CLI (`az` 2.90.0) instalado via `uv tool install azure-cli` — login confirmado
+  (`fabricioespel80@outlook.com`, assinatura "Azure subscription 1", subscription id
+  `91d5b811-3464-4f6a-91d9-2846c8488a84`, tenant "Default Directory"). **Nota:** a tentativa inicial via
+  `brew install azure-cli` ficou presa compilando dependências (`llvm@22` levou 6h26min do código-fonte,
+  `rust` em seguida) — o macOS 12 desta máquina é velho o suficiente para não ter os binários pré-compilados
+  ("bottles") do Homebrew para essas formulas, forçando build local gigante. `uv tool install` resolveu em
+  minutos, baixando wheels pré-compiladas. Lição: nesta máquina, preferir `uv tool install`/`pip install`
+  a `brew install` para ferramentas Python com dependências nativas pesadas.
+- ✅ Custo do node pool do AKS — sem estimativa prévia exata (Portal não mostra custo inline pro AKS
+  Automatic), mitigado com Budget + alertas (ver acima) em vez de número fixo antecipado; mecanismo de
+  desligamento definido (`az aks stop`/`start` manual entre sessões, a implementar na Fase 3).
+- ✅ Resource Group `rg-account-health-ml` criado em `eastus` (via `az group create`).
 - ⬜ ADLS Gen2 (bronze/silver/gold) + workspace Synapse Serverless — ainda não provisionados.
 
 **Nota sobre o setup da conta Azure (09/set/2026):** a primeira tentativa de criar a conta Azure com o
