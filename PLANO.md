@@ -63,16 +63,35 @@ qualquer custo. Estimativas da seção 6 seguem como referência, não como dead
 - **Problema de negócio:** prever churn (cancelamento) de conta a partir de sinais de uso de produto,
 billing/transações e suporte — o domínio deixa de ser estritamente "B2B SaaS" e passa a espelhar o do
 dataset público escolhido (assinatura de streaming/consumo digital), reaproveitando a mesma lógica de
-negócio (uso cai + suporte sobe → risco de churn sobe).
+negócio (uso cai + suporte sobe → risco de churn sobe) **como hipótese de trabalho a validar, não como
+premissa garantida** — ver achado da EDA na "Status da Fase 0" abaixo: o rótulo de churn do KKBox é
+puramente de billing/renovação (confirmado no script oficial `WSDMChurnLabeller.scala`), e a EDA na
+amostra não mostrou uma tendência de queda de uso claramente mais forte em churners do que em
+não-churners no curto prazo — a relação uso↓→churn↑ pode ser mais fraca ou mais indireta (via billing) do
+que o desenho original assumia. Sinais de billing (auto-renovação, sensibilidade a preço) entram como
+hipótese concorrente a testar na Fase 1.
 - **Dataset (revisado, 08/set/2026):**
   - **Fonte real — uso e billing:** [KKBox's Churn Prediction Challenge](https://www.kaggle.com/c/kkbox-churn-prediction-challenge/data)
     (WSDM Cup 2018, Kaggle) — dados reais de uma assinatura de streaming: `transactions` (billing/renovação,
     ~21,5M linhas), `user_logs` (uso diário, ~30M linhas), `members` (cadastro, ~6,7M linhas) e rótulo de
     churn já validado pela competição (~1M contas rotuladas).
-  - **Amostragem obrigatória:** o dataset completo é grande demais pro orçamento deste projeto — usar um
-    subconjunto de contas (ex.: N mil `msno` sorteados, a definir na Fase 0 junto da definição de sucesso),
-    documentando o critério de amostragem (aleatório estratificado por status de churn, para não distorcer
-    a proporção de classes).
+  - **Amostragem obrigatória (decidido, 10/set/2026):** o dataset completo é grande demais pro orçamento
+    deste projeto — usar um subconjunto de **25.000 contas (`msno`)**, sorteadas aleatoriamente e
+    estratificadas por status de churn, preservando a taxa real observada em `train_v2.csv`
+    (970.960 contas rotuladas, **9,0% de churn** — 87.330 churners). A amostra estratificada resulta em
+    ~2.250 churners e ~22.750 não-churners, com seed fixa (42) para reprodutibilidade.
+    - **Justificativa do tamanho (regra EPV — events per variable):** para modelos como regressão
+      logística, a prática recomendada ("one in ten rule") é ter pelo menos ~10 eventos da classe
+      minoritária (aqui, churners) por variável preditora (feature) no modelo, evitando overfitting e
+      coeficientes instáveis. Com ~2.250 churners na amostra, a regra suporta até ~225 features
+      (`2.250 / 10`) — bem acima do conjunto de features previsto para este projeto (uso, billing,
+      cadastro e suporte agregados por conta, provavelmente 10-25 no total), deixando folga confortável
+      sem exigir uma amostra maior.
+    - Tamanhos menores (5.000 e 10.000 contas) foram considerados e descartados: 5.000 geraria só ~450
+      churners, arriscado para um split robusto em treino/validação/teste; 10.000 (~900 churners) já
+      atenderia a regra EPV, mas 25.000 foi escolhido para ficar mais próximo de um volume realista de
+      produção, ainda representando só ~2,6% da população total (baixo custo de armazenamento/consulta
+      no Synapse Serverless).
   - **Camada sintética — suporte:** datasets públicos reais de uso/billing e de tickets de suporte não
     compartilham `account_id` entre si (são de empresas diferentes) — decisão tomada: gerar uma camada
     sintética de tickets de suporte, correlacionada de propósito com queda de uso das mesmas contas reais
@@ -181,6 +200,55 @@ Portal) logo após criar a conta.
   objetivo de "modelo pronto para produção", e o critério de amostragem (tamanho da amostra, estratégia de
   estratificação por churn).
 
+**Status da Fase 0 (atualizado em 10/set/2026):**
+
+- ✅ **Ingestão (bronze) concluída.** Amostra de 25.000 contas (ver critério EPV na seção 2) baixada via
+  Kaggle API, filtrada localmente com Polars (lazy/streaming para os arquivos grandes) e subida para o
+  container `bronze` do ADLS Gen2, um prefixo por fonte:
+  - `bronze/churn_labels/sample_accounts.csv` — 25.000 contas rotuladas (1,2MB).
+  - `bronze/members/members_sampled.csv` — 22.196 contas com cadastro completo (88,8% de match; 92,6%
+    entre churners vs. 88,4% entre não-churners — diferença pequena, não indica viés relevante) (1,6MB).
+  - `bronze/transactions/transactions_sampled.csv` — 390.735 transações, 24.949 contas únicas (99,8% de
+    match) (31,4MB).
+  - `bronze/user_logs/user_logs_sampled.csv` — 6.154.364 linhas de uso diário, 21.949 contas únicas
+    (87,8% de match) (471,8MB).
+  - `bronze/support_tickets_synthetic/support_tickets_synthetic.csv` — 128.800 tickets sintéticos gerados
+    com taxa de Poisson variável por conta-mês (base 0,05/mês, +1,2 em meses com queda de uso ≥30%),
+    correlação auditável: 90% dos tickets caem em mês de queda de uso, 18.973 contas (76% da amostra) têm
+    pelo menos 1 ticket. **Nota para a fase de EDA/feature engineering:** o limiar de -30% pode estar
+    capturando volatilidade normal de uso mês a mês além do sinal de risco real — revisitar se as features
+    derivadas parecerem ruidosas demais.
+  - Nota de qualidade de dado: ~11-12% das contas amostradas não têm registro em `members` e/ou em
+    `user_logs` — meio esperado para este dataset, mas precisa de tratamento explícito (feature de
+    "sem cadastro"/"sem uso registrado" ou imputação) no desenho da camada `gold`.
+- ⏳ **Transformação (silver) e Consolidação (gold)** — bloqueadas pelo workspace Synapse Serverless
+  ainda não provisionado (ver bloqueador registrado na Fase -1, seção 3: `SqlServerRegionDoesNotAllowProvisioning`,
+  restrição de assinatura nova, aguardando liberação — reconfirmado ainda ativo às ~19h do dia 10/set,
+  ~7h após a primeira tentativa). Os dados brutos já estão prontos em `bronze` esperando o Synapse liberar
+  para essa etapa. **Decisão registrada (10/set):** esperar a restrição liberar em vez de fazer o silver
+  localmente como atalho — o objetivo do projeto é aprender Synapse Serverless SQL de verdade, não só
+  destravar o progresso a qualquer custo. Também avaliado e descartado: trocar Azure por AWS por causa
+  desse bloqueio — a escolha de cloud foi orientada por padrão observado em 35+ vagas (seção 1), trocar
+  por um obstáculo temporário seria reativo, não estratégico.
+- ✅ **EDA inicial feito** (`scripts/06_eda.py`), rodado sobre os arquivos do bronze localmente (independe
+  do Synapse). Achados principais:
+  - **Qualidade de dado em `members`:** `bd` (idade) tem 48,7% de valores inválidos (≤0 ou >100, mediana
+    real é 0, máximo absurdo de 1035) — campo não usável como numérico direto, exige categorização
+    ("faixa etária" ou "não informado"). `gender` tem 59,7% de nulos — mesmo tratamento.
+  - **Transações:** 92,2% de taxa de auto-renovação, só 1,7% de cancelamento explícito — consistente com
+    a definição de churn do KKBox ser sobre não-renovação silenciosa, não cancelamento ativo.
+  - **Hipótese uso↓→churn↑ testada e não confirmada no curto prazo:** variação de uso mês a mês (métrica
+    robusta via log-ratio, mediana) ficou parecida entre churners e não-churners; comparação de recência/
+    volume de meses ativos também não mostrou diferença (ambos os grupos com o mesmo teto de dado,
+    fev/2017, e média de ~15-16 meses ativos). Investigado com o script oficial de rotulagem
+    (`WSDMChurnLabeller.scala`, baixado e lido): confirma que o rótulo de churn do KKBox é 100%
+    baseado em renovação de billing (expiração em fev/2017 + checagem de renovação em até 30 dias via
+    transações fev-mar/2017), **não em uso** — o que explica por que a correlação simples com uso não
+    apareceu forte. Ver ajuste da hipótese na seção 2. Ação: testar features de billing (mudança em
+    auto-renovação, sensibilidade a preço) como preditores concorrentes/complementares na Fase 1, em vez
+    de assumir uso como sinal dominante.
+- ⬜ Definição de sucesso por escrito (métrica principal, baseline, critério de "pronto") — ainda não feita.
+
 ### Fase 1 — Baseline e modelagem clássica
 
 - Baseline heurístico simples (ex.: "sinalizar conta se uso caiu mais de 30% nos últimos 14 dias") — ponto de
@@ -280,8 +348,9 @@ ativamente demonstrando o projeto) — mecanismo automatizado, não dependência
 - **(Novo, 08/set/2026)** Por que Azure Synapse Serverless SQL para bronze→silver→gold, em vez de scripts
   Python simples (menos realista para o gap de "data lake na Azure") ou um Spark Pool dedicado (custo e
   complexidade fora do orçamento deste projeto).
-- **(Novo, 08/set/2026)** Critério de amostragem do KKBox (tamanho da amostra e estratificação por churn) —
-  por que um subconjunto e não o dataset completo (~21,5M/30M linhas).
+- **(Decidido, 10/set/2026)** Critério de amostragem do KKBox — 25.000 contas estratificadas por churn
+  (taxa real 9,0%), justificado pela regra EPV (events per variable) além do argumento de custo/orçamento.
+  Ver detalhe completo na seção 2.
 - **(Novo, 08/set/2026)** Por que manter a definição nativa de churn do KKBox (30 dias pós-expiração) em vez
   da janela de 60 dias do plano original.
 
