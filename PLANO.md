@@ -247,6 +247,17 @@ Portal) logo após criar a conta.
     apareceu forte. Ver ajuste da hipótese na seção 2. Ação: testar features de billing (mudança em
     auto-renovação, sensibilidade a preço) como preditores concorrentes/complementares na Fase 1, em vez
     de assumir uso como sinal dominante.
+  - **Features de billing testadas (`scripts/07_eda_billing.py`) — sinais fortes confirmados:**
+    auto-renovação ativa na última transação (92,6% não-churn vs. 47,8% churn — diferença enorme);
+    já desligou auto-renovação alguma vez no histórico (0,6% vs. 5,0% — raro, mas ~8,6x mais comum em
+    churners); nº de transações históricas/tenure de billing (mediana 17 vs. 10 — churners com bem menos
+    histórico). Sinais fracos/nulos: histórico de cancelamento explícito (21,1% vs. 25,8%, diferença
+    pequena), desconto médio e duração do plano (sem diferença, mediana igual nos dois grupos).
+    **Ressalva importante:** a feature de auto-renovação é forte a ponto de ser quase mecânica (não é
+    vazamento de rótulo — o script de rotulagem não usa essa flag diretamente — mas é uma proxy quase
+    direta de "vai gerar transação de renovação automaticamente"). Um modelo apoiado só nela vira trivial;
+    o desafio de ML real está em combinar isso com tenure, uso e suporte para nuance, não em só achar essa
+    variável. Reportar métricas do modelo final também sem essa feature, como comparação, na Fase 1.
 - ⬜ Definição de sucesso por escrito (métrica principal, baseline, critério de "pronto") — ainda não feita.
 
 ### Fase 1 — Baseline e modelagem clássica
