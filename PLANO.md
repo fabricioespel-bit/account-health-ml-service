@@ -97,12 +97,19 @@ hipótese concorrente a testar na Fase 1.
     sintética de tickets de suporte, correlacionada de propósito com queda de uso das mesmas contas reais
     amostradas (mesma causalidade do plano original: uso↓ → tickets↑ → churn↑), documentada
     explicitamente no README como lacuna de dado público real disponível, não como dado real disfarçado.
-  - **Ingestão via data lake simplificado na Azure** (ADLS Gen2 bronze/silver/gold + Azure Synapse
-    Serverless SQL para as transformações) em vez de carregar direto em Azure SQL Database — decisão
-    revisada: o objetivo agora inclui aprender ingestão multi-fonte de verdade, então a simplificação deixada
-    de lado no plano v2/v3 (ADLS Gen2 + Synapse) volta ao escopo, mas usando **Synapse Serverless** (sem
-    cluster/pool dedicado pra gerenciar) em vez de uma arquitetura completa com Spark/pools dedicados —
-    ainda um corte deliberado de complexidade (ver seção 4).
+  - **Ingestão via data lake simplificado na Azure** (ADLS Gen2 bronze/silver/gold) em vez de carregar
+    direto em Azure SQL Database — decisão revisada: o objetivo inclui aprender ingestão multi-fonte de
+    verdade, então a simplificação deixada de lado no plano v2/v3 (ADLS Gen2) volta ao escopo.
+    **Revisão (11/set/2026):** a transformação bronze→silver→gold, originalmente planejada via **Azure
+    Synapse Serverless SQL**, foi **abandonada** — a assinatura ficou bloqueada por uma restrição real de
+    capacidade regional da Microsoft para novos SQL Servers em East US (não é temporária: pedido formal de
+    "Region access" foi **negado** por alta demanda, sem prazo — ver detalhe na "Status da Fase 0").
+    Transformação segue **local, em Python/Polars**, escrevendo Parquet direto nos containers `silver`/
+    `gold` do ADLS Gen2; a camada `gold` final é lida pelo serviço FastAPI (Fase 2) via SDK
+    `azure-storage-file-datalake`, sem depender de nenhum banco relacional — evita reintroduzir a mesma
+    dependência de `Microsoft.Sql`/SQL Server que causou o bloqueio. Mantém o gap de "data lake real na
+    Azure" (ADLS Gen2 + AKS), sacrificando especificamente a experiência de SQL serverless sobre o lake
+    (ver seção 4 para a decisão completa).
 - **Variável-alvo:** usar a **definição nativa de churn do KKBox** (não-renovação em até 30 dias após o fim
   do período pago), documentada e comparada explicitamente com a janela de 60 dias do plano original —
   decisão registrada: manter a definição validada pela competição em vez de forçar uma redefinição
@@ -132,10 +139,11 @@ verificada, validar as dependências externas que podem mudar o caminho do proje
 - **(Novo, 08/set/2026)** Confirmar conta Kaggle ativa + token de API (`kaggle.json`), necessário para baixar
   o dataset KKBox — aceitar as regras da competição no site é pré-requisito para o download funcionar.
 - **(Novo, 08/set/2026)** Provisionar a conta de armazenamento ADLS Gen2 (containers `bronze`, `silver`,
-  `gold`) e o workspace do Azure Synapse (modo Serverless) dentro do Resource Group do projeto.
+  `gold`) dentro do Resource Group do projeto. ~~e o workspace do Azure Synapse (modo Serverless)~~ —
+  **abandonado em 11/set/2026**, ver "Status da Fase 0" e seção 4 (decisão de arquitetura).
 - Critério de saída da Fase -1: por escrito, (a) confirmação AKS Automatic disponível ou fallback assumido,
   (b) estimativa de custo/hora do node pool e mecanismo de desligamento definido, (c) ambiente Azure
-  pronto (assinatura, CLI, resource group, ADLS Gen2, Synapse Serverless), (d) acesso ao Kaggle confirmado.
+  pronto (assinatura, CLI, resource group, ADLS Gen2), (d) acesso ao Kaggle confirmado.
 
 **Status da Fase -1 (atualizado em 09/set/2026):**
 
@@ -167,7 +175,11 @@ verificada, validar as dependências externas que podem mudar o caminho do proje
   Automatic), mitigado com Budget + alertas (ver acima) em vez de número fixo antecipado; mecanismo de
   desligamento definido (`az aks stop`/`start` manual entre sessões, a implementar na Fase 3).
 - ✅ Resource Group `rg-account-health-ml` criado em `eastus` (via `az group create`).
-- ⬜ ADLS Gen2 (bronze/silver/gold) + workspace Synapse Serverless — ainda não provisionados.
+- ✅ ADLS Gen2 (`sahealthml2026fe`, containers `bronze`/`silver`/`gold`) provisionado em 10/set — detalhe
+  completo na "Status da Fase 0". Workspace Synapse Serverless **abandonado** em 11/set (ver Fase 0 e
+  seção 4) — não faz mais parte do critério de saída desta fase.
+- ✅ **Fase -1 encerrada** (11/set/2026): todos os itens do critério de saída atendidos, com o Synapse
+  removido do escopo.
 
 **Nota sobre o setup da conta Azure (09/set/2026):** a primeira tentativa de criar a conta Azure com o
 e-mail pessoal (`fabricioespel@gmail.com`) resultou no tenant caindo dentro do Microsoft Entra ID da
@@ -188,13 +200,17 @@ Portal) logo após criar a conta.
   prefixo por fonte, sem transformação. Gerar a camada sintética de tickets de suporte (correlacionada com
   queda de uso das mesmas contas amostradas) e subir também como fonte própria em `bronze`, claramente
   identificada como sintética (ex. prefixo `bronze/support_tickets_synthetic/`).
-- **Transformação (silver):** views/CTAS no Synapse Serverless SQL sobre os arquivos do `bronze` — tipagem,
-  deduplicação, padronização de datas, escritas em Parquet no container `silver`. Um modelo por fonte,
-  mesma disciplina do padrão bronze/silver/gold já usado no projeto de referência (fictício) citado na seção 1.
-- **Consolidação (gold):** tabela única `gold_account_activity` juntando uso + billing reais (por `msno`) com a
-  camada sintética de suporte, no formato inspirado em `gld_account_activity_daily` (ver seção 1), escrita em
-  `gold` no ADLS Gen2 — e só essa tabela final, já pequena, carregada em Azure SQL Database para servir de
-  camada de features de treino/inferência (mantém a Fase 2 simples, sem o serviço FastAPI depender do lake).
+- **Transformação (silver) — revisado 11/set/2026:** scripts Python/Polars locais lendo os arquivos do
+  `bronze` — tipagem, deduplicação, padronização de datas — escrevendo Parquet no container `silver` via
+  upload (`azure-storage-file-datalake`). Um modelo por fonte, mesma disciplina do padrão bronze/silver/
+  gold já usado no projeto de referência (fictício) citado na seção 1. (Originalmente planejado via views/
+  CTAS no Synapse Serverless SQL — abandonado por bloqueio de capacidade regional, ver seção 4.)
+- **Consolidação (gold) — revisado 11/set/2026:** tabela única `gold_account_activity` juntando uso +
+  billing reais (por `msno`) com a camada sintética de suporte, no formato inspirado em
+  `gld_account_activity_daily` (ver seção 1), escrita como Parquet em `gold` no ADLS Gen2. O serviço
+  FastAPI (Fase 2) lê essa tabela direto do ADLS Gen2 (pequena, cabe em memória) no startup, sem depender
+  de um banco relacional — evita reintroduzir a dependência de `Microsoft.Sql` que causou o bloqueio do
+  Synapse. (Originalmente planejado como carga em Azure SQL Database.)
 - Definir por escrito, antes de treinar qualquer modelo: métrica principal (recall a uma precisão mínima
   aceitável, calibrada depois de ver a distribuição real de churn da amostra), baseline mínimo, critério
   objetivo de "modelo pronto para produção", e o critério de amostragem (tamanho da amostra, estratégia de
@@ -221,17 +237,19 @@ Portal) logo após criar a conta.
   - Nota de qualidade de dado: ~11-12% das contas amostradas não têm registro em `members` e/ou em
     `user_logs` — meio esperado para este dataset, mas precisa de tratamento explícito (feature de
     "sem cadastro"/"sem uso registrado" ou imputação) no desenho da camada `gold`.
-- ⏳ **Transformação (silver) e Consolidação (gold)** — bloqueadas pelo workspace Synapse Serverless
-  ainda não provisionado (`SqlServerRegionDoesNotAllowProvisioning`, testado em `eastus` e `eastus2`, CLI
-  e UI). **Correção importante (11/set):** essa restrição **não se resolve sozinha com o tempo** — depois
-  de 3 tentativas ao longo de ~2 dias sem mudança, pesquisamos a documentação oficial da Microsoft
-  ([capacity-errors-troubleshoot](https://learn.microsoft.com/en-us/azure/azure-sql/capacity-errors-troubleshoot?view=azuresql)),
-  que confirma: essa mensagem exata exige um pedido explícito de **"Region access"** (tipo de cota do SQL
-  Database), não espera passiva. Diferente da rota de suporte técnico geral (que pediu plano pago em
-  10/set), o pedido de cota é tratado como self-service e foi aberto **gratuitamente** em 11/set —
-  chamado nº **2609110040003068** (Region access, East US, ~10 vCores esperados). Os dados brutos já
-  estão prontos em `bronze` esperando essa liberação. Decisão mantida: esperar o Synapse (em vez de fazer
-  o silver localmente ou trocar de cloud) — ver justificativa completa no histórico do projeto.
+- ❌ **Synapse Serverless — abandonado (11/set/2026).** Histórico completo do bloqueio:
+  `SqlServerRegionDoesNotAllowProvisioning` ao tentar criar o workspace, testado em `eastus` e `eastus2`,
+  via CLI e UI, identicamente. Pesquisa na documentação oficial da Microsoft
+  ([capacity-errors-troubleshoot](https://learn.microsoft.com/en-us/azure/azure-sql/capacity-errors-troubleshoot?view=azuresql))
+  revelou que essa mensagem exige um pedido explícito de **"Region access"** (cota de SQL Database), não
+  espera passiva — chamado nº **2609110040003068** foi aberto gratuitamente (rota de cota é self-service,
+  diferente do suporte técnico geral que pediu plano pago) pedindo acesso em East US. **Resposta da
+  Microsoft (11/set/2026, via e-mail do suporte):** pedido **negado** — "due to high demand for Azure SQL
+  DB in east US region", sem prazo de resolução (oferecia só: atualizações bimensais, aviso quando
+  liberar, ou arquivar o pedido). **Decisão: abandonar o Synapse Serverless SQL** em vez de pedir acesso a
+  outra região — ver racional completo na seção 4 ("Decisões de arquitetura"). Os dados brutos já prontos
+  em `bronze` não são afetados; a transformação segue local (Python/Polars), sem depender de nenhum
+  recurso `Microsoft.Sql`. Chamado de suporte deixado para arquivamento (não é mais necessário).
 - ✅ **EDA inicial feito** (`scripts/06_eda.py`), rodado sobre os arquivos do bronze localmente (independe
   do Synapse). Achados principais:
   - **Qualidade de dado em `members`:** `bd` (idade) tem 48,7% de valores inválidos (≤0 ou >100, mediana
@@ -342,12 +360,14 @@ do K8s".
 
 ### Fase 4 — Monitoramento e detecção de drift
 
-- Logging estruturado de predições de volta no Azure SQL Database (tabela de predictions), reaproveitando o
-padrão de "monitoramento contínuo" já estabelecido no nível 4 do rag-quality-assurance.
+- **Revisado 11/set/2026:** logging estruturado de predições em **Azure Table Storage** (mesma storage
+  account do data lake, sem depender de `Microsoft.Sql`/SQL Server — ver decisão de abandonar Azure SQL
+  Database na seção 4) em vez de Azure SQL Database, reaproveitando o padrão de "monitoramento contínuo"
+  já estabelecido no nível 4 do rag-quality-assurance.
 - Logs de aplicação/infraestrutura via Azure Monitor / Log Analytics — equivalente ao Cloud Logging do lado
 GCP.
-- Checagem simples de drift de dados (distribuição de features ao longo do tempo, via query SQL), com critério
-documentado de quando um alerta dispararia.
+- Checagem simples de drift de dados (distribuição de features ao longo do tempo, lendo os Parquets do
+  `gold` com Polars em vez de query SQL), com critério documentado de quando um alerta dispararia.
 
 ### Fase 5 (stretch, só se sobrar tempo) — CI/CD
 
@@ -366,8 +386,24 @@ multi-cloud, não indecisão.
 - Por que AKS (Automatic, se disponível) em vez de Azure Container Apps — o gap intencional é Kubernetes
 de verdade.
 - Por que Key Vault + Workload Identity, não secrets estáticos.
-- Por que Azure SQL Database só para a tabela `gold` final (camada de features), com o restante do lake em
-ADLS Gen2 — não a arquitetura completa de um data warehouse, mas também não mais "tudo em SQL direto".
+- **(Revisado, 11/set/2026)** Por que abandonar Azure Synapse Serverless SQL e Azure SQL Database
+  inteiramente, em favor de transformação local (Python/Polars) + Parquet no ADLS Gen2 servido direto pelo
+  FastAPI + Azure Table Storage para logging de predições: a assinatura recebeu uma **negativa formal e
+  sem prazo** da Microsoft ("high demand for Azure SQL DB in east US region") para um pedido de "Region
+  access" — não era um bloqueio temporário de propagação (como os providers da Fase -1), era uma restrição
+  real de capacidade. Continuar dependente de `Microsoft.Sql` (seja via Synapse, seja via uma Azure SQL
+  Database separada para servir a camada `gold` ou logar predições na Fase 4) arriscava bater na mesma
+  parede de novo mais adiante. Opções consideradas: (a) pedir "Region access" para outra região — mais
+  simples de aprovar (a negativa foi específica de East US), mas ainda mantém uma dependência de recurso
+  que já provou ser frágil nesta assinatura; (b) trocar o projeto inteiro para AWS — descartado, mesmo
+  racional de mercado (35+ vagas) que justificou escolher Azure originalmente, e jogaria fora toda a infra
+  já validada (storage, containers, AKS confirmado); **(c) escolhida:** remover a dependência de SQL
+  Server do projeto por completo, migrando as duas únicas funções que a usavam (servir features da `gold`
+  e logar predições) para serviços da própria storage account já provisionada (Blob/ADLS Gen2 e Table
+  Storage). Mantém os três gaps originais (ML clássico, Kubernetes, Azure — ver seção 1) intactos; o único
+  gap sacrificado é a experiência específica de SQL serverless sobre data lake, substituída por experiência
+  real com Azure Table Storage (NoSQL) e leitura de Parquet direto do ADLS Gen2 por um serviço em produção
+  — ainda genuinamente "Azure", só não a peça específica do Synapse.
 - Trade-off de custo: gestão do node pool do AKS entre sessões de uso (reduzir/desligar quando não estiver
 ativamente demonstrando o projeto) — mecanismo automatizado, não dependência de lembrar manualmente.
 - **(Novo)** Resultado da validação de AKS Automatic feita na Fase -1: **disponível** para a assinatura na
@@ -409,16 +445,15 @@ majoritariamente Python/SQL.
 simplificado (gap técnico a mais, de propósito). O prazo de 15/09/2026 (saída da Hagens) não é mais um
 limitador — prioridade é o aprendizado e a qualidade de cada etapa.
 
-## 7. Próximos passos imediatos
+## 7. Próximos passos imediatos (atualizado, 11/set/2026)
 
-- Fase -1: validar disponibilidade de AKS Automatic, confirmar assinatura/créditos Azure, instalar `az`,
-  criar Resource Group, provisionar ADLS Gen2 + Synapse Serverless, confirmar acesso ao Kaggle, e definir
-  mecanismo de desligamento de custo do cluster.
-- Criar o repositório `account-health-ml-service` (público, github.com/fabricioespel-bit).
-- Fase 0: baixar a amostra do KKBox, ingerir em `bronze`, gerar a camada sintética de suporte, transformar
-  até `gold` via Synapse Serverless, carregar a tabela final em Azure SQL Database, e escrever por escrito a
-  definição de sucesso (métrica principal, baseline, critério de "pronto", critério de amostragem) antes de
-  qualquer linha de modelo.
+- ✅ Fase -1 completa (Azure, Kaggle, AKS Automatic validado, ADLS Gen2 — Synapse removido do escopo).
+- ✅ Fase 0 quase completa: ingestão bronze, EDA de uso e billing, definição de sucesso — tudo feito.
+- **Pendente na Fase 0:** escrever os scripts locais de transformação silver (tipagem/dedup dos arquivos
+  do `bronze`) e consolidação gold (`gold_account_activity`), e subir os Parquets resultantes pro ADLS
+  Gen2 — substitui o que seria feito via Synapse Serverless (abandonado, ver seção 4).
+- Depois disso: Fase 1 (baseline heurístico já calculado — F2=0,494 — mais os modelos de ML clássico:
+  Logistic Regression, XGBoost/LightGBM, avaliação com PR-AUC/F2 contra a meta de F2≥0,65).
 
 **Ideia para depois (fora de escopo agora):** se este projeto validar bem a experiência em Azure, um
 segundo projeto natural seria replicar parte do RAG/agentes do amigurumi-agent usando Azure OpenAI +
