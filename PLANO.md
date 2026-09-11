@@ -222,14 +222,16 @@ Portal) logo após criar a conta.
     `user_logs` — meio esperado para este dataset, mas precisa de tratamento explícito (feature de
     "sem cadastro"/"sem uso registrado" ou imputação) no desenho da camada `gold`.
 - ⏳ **Transformação (silver) e Consolidação (gold)** — bloqueadas pelo workspace Synapse Serverless
-  ainda não provisionado (ver bloqueador registrado na Fase -1, seção 3: `SqlServerRegionDoesNotAllowProvisioning`,
-  restrição de assinatura nova, aguardando liberação — reconfirmado ainda ativo às ~19h do dia 10/set,
-  ~7h após a primeira tentativa). Os dados brutos já estão prontos em `bronze` esperando o Synapse liberar
-  para essa etapa. **Decisão registrada (10/set):** esperar a restrição liberar em vez de fazer o silver
-  localmente como atalho — o objetivo do projeto é aprender Synapse Serverless SQL de verdade, não só
-  destravar o progresso a qualquer custo. Também avaliado e descartado: trocar Azure por AWS por causa
-  desse bloqueio — a escolha de cloud foi orientada por padrão observado em 35+ vagas (seção 1), trocar
-  por um obstáculo temporário seria reativo, não estratégico.
+  ainda não provisionado (`SqlServerRegionDoesNotAllowProvisioning`, testado em `eastus` e `eastus2`, CLI
+  e UI). **Correção importante (11/set):** essa restrição **não se resolve sozinha com o tempo** — depois
+  de 3 tentativas ao longo de ~2 dias sem mudança, pesquisamos a documentação oficial da Microsoft
+  ([capacity-errors-troubleshoot](https://learn.microsoft.com/en-us/azure/azure-sql/capacity-errors-troubleshoot?view=azuresql)),
+  que confirma: essa mensagem exata exige um pedido explícito de **"Region access"** (tipo de cota do SQL
+  Database), não espera passiva. Diferente da rota de suporte técnico geral (que pediu plano pago em
+  10/set), o pedido de cota é tratado como self-service e foi aberto **gratuitamente** em 11/set —
+  chamado nº **2609110040003068** (Region access, East US, ~10 vCores esperados). Os dados brutos já
+  estão prontos em `bronze` esperando essa liberação. Decisão mantida: esperar o Synapse (em vez de fazer
+  o silver localmente ou trocar de cloud) — ver justificativa completa no histórico do projeto.
 - ✅ **EDA inicial feito** (`scripts/06_eda.py`), rodado sobre os arquivos do bronze localmente (independe
   do Synapse). Achados principais:
   - **Qualidade de dado em `members`:** `bd` (idade) tem 48,7% de valores inválidos (≤0 ou >100, mediana
