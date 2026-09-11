@@ -260,7 +260,25 @@ Portal) logo após criar a conta.
     direta de "vai gerar transação de renovação automaticamente"). Um modelo apoiado só nela vira trivial;
     o desafio de ML real está em combinar isso com tenure, uso e suporte para nuance, não em só achar essa
     variável. Reportar métricas do modelo final também sem essa feature, como comparação, na Fase 1.
-- ⬜ Definição de sucesso por escrito (métrica principal, baseline, critério de "pronto") — ainda não feita.
+- ✅ **Definição de sucesso por escrito (decidido, 11/set/2026):**
+  - **Métrica de comparação entre modelos:** PR-AUC (Average Precision) — mais robusta que ROC-AUC dado
+    o desbalanceamento (9% de churn).
+  - **Métrica de decisão ("modelo é melhor que o outro"):** F2-score (recall pesa 2x mais que precisão),
+    justificado pela assimetria de custo do negócio: perder um churner (FN) custa receita recorrente
+    perdida; alertar uma conta que não ia sair (FP) custa só um contato de retenção de baixo custo.
+  - **Baseline mínimo (calculado, `scripts/08_baseline_billing.py`):** regra de uma linha "flagar como
+    risco se auto-renovação estiver desligada na última transação" — **Precisão 40,7%, Recall 52,2%,
+    F2 = 0,494** (TP=1160, FP=1691, FN=1061, TN=21037, sobre as 24.949 contas com transação). Esse é o
+    número que qualquer modelo de ML precisa superar pra justificar a complexidade extra sobre uma regra
+    simples.
+  - **Critério de "modelo pronto para produção":** **F2 ≥ 0,65** no conjunto de teste (split temporal,
+    não aleatório — ver seção 2), ~30% de melhoria relativa sobre o baseline. Escolhido como meta
+    moderada: ambiciosa o suficiente pra justificar ML de verdade combinando billing + cadastro + suporte
+    sintético, mas realista dado que a fonte de uso (`user_logs`) já mostrou sinal fraco na EDA e o sinal
+    mais forte isolado (auto-renovação) já está "gasto" no próprio baseline.
+  - **Ressalva de robustez (ligada ao achado da EDA de billing):** reportar F2 também **sem** a feature de
+    auto-renovação, pra confirmar que o modelo não depende trivialmente dela — um modelo que só repete o
+    baseline com outra roupagem não conta como sucesso real.
 
 ### Fase 1 — Baseline e modelagem clássica
 
