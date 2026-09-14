@@ -310,6 +310,18 @@ Portal) logo após criar a conta.
     direta de "vai gerar transação de renovação automaticamente"). Um modelo apoiado só nela vira trivial;
     o desafio de ML real está em combinar isso com tenure, uso e suporte para nuance, não em só achar essa
     variável. Reportar métricas do modelo final também sem essa feature, como comparação, na Fase 1.
+- ✅ **Transformação (silver) e Consolidação (gold) concluídas (14/set/2026)**, localmente via Python/
+  Polars (substituindo o Synapse abandonado — ver acima e seção 4), seguindo o schema desenhado nesta
+  mesma data:
+  - `scripts/09_transform_silver.py`: gerou as 5 tabelas silver (`churn_labels`, `members`, `transactions`
+    — dedup removeu 69 linhas duplicadas exatas, `user_logs`, `support_tickets`), subidas em Parquet
+    (`compression="zstd"`) pro container `silver` do ADLS Gen2.
+  - `scripts/10_build_gold.py`: consolidou `gold_account_activity` (25.000 linhas, 21 colunas), subida
+    pro container `gold`. Nulos por coluna bateram exatamente com as taxas de match já conhecidas da EDA
+    (11,2% sem cadastro, 0,2% sem transação, 12,2% sem uso, 16,1% sem variação de uso mês-a-mês — esse
+    último maior porque exige pelo menos 2 meses de histórico, não só 1) — confirma que o pipeline está
+    correto, sem inconsistência nova introduzida na consolidação.
+  - **Fase 0 está 100% completa.**
 - ✅ **Definição de sucesso por escrito (decidido, 11/set/2026):**
   - **Métrica de comparação entre modelos:** PR-AUC (Average Precision) — mais robusta que ROC-AUC dado
     o desbalanceamento (9% de churn).
