@@ -359,6 +359,53 @@ um público de negócio.
     virar notebook interativo ou dashboard de negócio nesta fase. Quando chegarmos neste ponto,
     **retomar essa decisão explicitamente** e avaliar se vale a pena evoluir para notebook dedicado ou
     dashboard, considerando o tempo disponível naquele momento.
+  - **Revisado, 14/set/2026:** SHAP não pôde ser instalado — a versão resolvida (0.52.0) trava numa
+    dependência exata de `llvmlite==0.36.0`, que só suporta Python até 3.9 (o projeto usa 3.12/3.13).
+    Substituído por **importância de feature nativa do XGBoost** (`feature_importances_`) — cobre a mesma
+    necessidade de explicabilidade básica do plano original sem a dependência quebrada.
+
+**Status da Fase 1 (atualizado em 14/set/2026):**
+
+- ✅ **Notebook estruturado** criado em `notebooks/01_fase1_modelagem.ipynb` (célula por célula, kernel do
+  `.venv` do projeto). Novas dependências: `scikit-learn`, `xgboost`, `pandas`, `matplotlib`,
+  `ipykernel`/`jupyter` (dev). `shap` descartado pelo motivo acima.
+- ✅ **Split 70/15/15 estratificado** confirmado: 17.499/3.751/3.750 contas, 9,0% de churn mantido nos três
+  conjuntos.
+- ✅ **Bug real encontrado e corrigido na origem** (`scripts/10_build_gold.py`): `desconto_medio` virava
+  `infinity` quando `plan_list_price = 0` (transações promocionais/trial) — afetava 29,6% das contas.
+  Corrigido pra `null` quando não há preço de tabela pra calcular a razão; gold reprocessado e reenviado
+  ao ADLS Gen2.
+- ✅ **Modelos treinados e avaliados** (métricas: PR-AUC pra comparação, F2-score pra decisão — ver
+  definição de sucesso na Fase 0):
+
+  | Modelo | F2 (validação) | F2 (teste) |
+  |---|---|---|
+  | Baseline (regra de billing, Fase 0) | — | 0,494 |
+  | Logistic Regression | 0,572 | — |
+  | XGBoost (hiperparâmetro padrão) | 0,614 | — |
+  | XGBoost (`RandomizedSearchCV`, 30 iter × 3 folds, `scoring=average_precision`) | 0,626 | — |
+  | XGBoost (busca ampliada, 50 iter, +`scale_pos_weight`/regularização) | 0,629 | **0,601 (oficial)** |
+  | XGBoost, sem `auto_renew_ultima` (checagem de robustez) | — | 0,568 |
+
+  **Meta de produção (F2≥0,65) não foi atingida** — resultado final honesto: F2=0,601 no teste, ~22% de
+  melhoria relativa sobre o baseline. A busca de hiperparâmetro **saturou** (duas rodadas de
+  `RandomizedSearchCV` convergiram pro mesmo PR-AUC de validação cruzada, 0,605, inclusive escolhendo
+  `scale_pos_weight=1` — ou seja, rebalancear não ajudou) — sinal de que o teto está no conjunto de
+  features atual, não em ajuste fino. **Decisão: aceitar o resultado e documentar honestamente**, em vez
+  de insistir em mais tuning com retorno decrescente comprovado (ver seção 4 para a decisão registrada).
+- ✅ **Checagem de robustez confirmada:** removendo `auto_renew_ultima` (a feature "forte demais" que já
+  havíamos sinalizado como quase mecânica), o F2 no teste cai só **5,4%** (0,601 → 0,568), continuando
+  acima do baseline (+15%). Confirma que o modelo combina sinais de verdade (tenure, recência, uso,
+  suporte), não depende trivialmente de uma única variável.
+- ✅ **Importância de features (XGBoost nativo) — achado novo:** `auto_renew_ultima` (39,1%) e
+  **`dias_desde_ultima_transacao`** (22,8%) somam **62% de toda a importância** — a recência da última
+  transação é um sinal forte que a EDA de billing anterior não tinha testado explicitamente. Uso
+  (`user_logs`) confirma sinal fraco (todas as features de uso abaixo de 2% cada, consistente com o achado
+  da EDA). **Os tickets de suporte sintéticos também saem irrelevantes** (~1% cada) — cadeia de
+  causalidade honesta: como o uso real é fraco, o sinal de suporte "montado propositalmente em cima da
+  queda de uso" (Fase 0) também acaba fraco no modelo final, não é um problema de implementação.
+- ⬜ Rede neural (Modelo 3, stretch) — não feita, dado que XGBoost já é o modelo mais forte e a diferença
+  pro baseline já está clara; avaliar se vale a pena mais adiante.
 
 ### Fase 2 — Empacotamento do modelo como serviço
 
@@ -464,6 +511,17 @@ ativamente demonstrando o projeto) — mecanismo automatizado, não dependência
   Ver detalhe completo na seção 2.
 - **(Novo, 08/set/2026)** Por que manter a definição nativa de churn do KKBox (30 dias pós-expiração) em vez
   da janela de 60 dias do plano original.
+- **(Decidido, 14/set/2026)** Por que aceitar F2=0,601 (teste) em vez de continuar tentando bater a meta de
+  0,65: duas rodadas de `RandomizedSearchCV` (30 e 50 iterações, incluindo `scale_pos_weight` e
+  regularização na segunda) convergiram pro mesmo PR-AUC de validação cruzada (0,605) — sinal claro de
+  saturação, não de busca insuficiente. A segunda busca inclusive escolheu `scale_pos_weight=1` como ótimo,
+  confirmando que rebalancear a classe minoritária não ajuda mais. Alternativas consideradas: (a) engenharia
+  de features adicional (ex.: recência de suporte, tendência de valor pago) — descartada por ora, retorno
+  incerto e a meta de 0,65 já era declaradamente uma "aspiração moderada" desde a Fase 0, não uma garantia;
+  (b) forçar um threshold ou métrica que maquiasse o número — rejeitado por ir contra o princípio de rigor
+  do projeto. Resultado real: F2=0,601 supera o baseline em ~22%, e a checagem de robustez (sem
+  `auto_renew_ultima`) confirma que o modelo não é trivial (queda de só 5,4%). Documentar essa distância da
+  meta explicitamente no README como resultado honesto, não escondê-la.
 
 ## 5. Critério de conclusão
 
