@@ -33,7 +33,9 @@ billing_feat = tx_sorted.group_by("msno").agg(
     pl.col("is_auto_renew").last().alias("auto_renew_ultima"),
     ((pl.col("is_auto_renew").first()) & (~pl.col("is_auto_renew").last())).alias("desligou_auto_renovacao"),
     pl.col("is_cancel").max().alias("ja_cancelou"),
-    ((pl.col("plan_list_price") - pl.col("actual_amount_paid")) / pl.col("plan_list_price"))
+    pl.when(pl.col("plan_list_price") > 0)
+        .then((pl.col("plan_list_price") - pl.col("actual_amount_paid")) / pl.col("plan_list_price"))
+        .otherwise(None)
         .mean().alias("desconto_medio"),
     pl.col("payment_plan_days").last().alias("plano_dias_ultimo"),
     pl.col("transaction_date").last().alias("_ultima_transacao"),

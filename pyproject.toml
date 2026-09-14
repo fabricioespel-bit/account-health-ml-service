@@ -10,10 +10,16 @@ dependencies = [
     "azure-storage-file-datalake>=12.16",
     "kaggle>=1.6",
     "numpy>=2.0",
+    "scikit-learn>=1.9.1",
+    "xgboost>=3.4.1",
+    "matplotlib>=3.11.2",
+    "pandas>=3.0.5",
 ]
 
 [dependency-groups]
 dev = [
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
     "py7zr>=1.1.3",
     "pytest>=8.3",
 ]
