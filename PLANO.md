@@ -115,8 +115,14 @@ hipótese concorrente a testar na Fase 1.
   decisão registrada: manter a definição validada pela competição em vez de forçar uma redefinição
   artificial de 60 dias sobre um dado real que já tem um rótulo estabelecido (mais simples e mais honesto
   ao dado do que reinterpretar a fonte).
-- **Split temporal, não aleatório** — evita vazamento de informação futura. Documentar essa decisão
-explicitamente.
+- **Split treino/validação/teste — revisado 14/set/2026:** o plano original pedia split temporal (não
+  aleatório) para evitar vazamento de informação futura — premissa válida para um dataset sintético com
+  histórico contínuo por conta, mas **não se aplica ao KKBox**: o rótulo de churn é avaliado numa única
+  janela fixa (expiração em fev/2017, checada via transações fev-mar/2017) igual para as 25.000 contas —
+  não existe "passado" e "futuro" natural entre contas para particionar temporalmente. **Decisão: split
+  aleatório estratificado por `is_churn`, 70/15/15** (treino/validação/teste), mantendo a proporção de 9%
+  de churn em cada parte. Documentar essa mudança de premissa explicitamente no README (é uma correção
+  honesta sobre a fonte de dado real, não um descuido).
 
 ## 3. Fases do projeto
 
@@ -211,6 +217,32 @@ Portal) logo após criar a conta.
   FastAPI (Fase 2) lê essa tabela direto do ADLS Gen2 (pequena, cabe em memória) no startup, sem depender
   de um banco relacional — evita reintroduzir a dependência de `Microsoft.Sql` que causou o bloqueio do
   Synapse. (Originalmente planejado como carga em Azure SQL Database.)
+
+  **Schema silver/gold (desenhado 14/set/2026):**
+
+  *Silver — um modelo por fonte, tipado/deduplicado, sem agregação:*
+  - `silver/churn_labels`: `msno` (str), `is_churn` (bool) — passthrough tipado.
+  - `silver/members`: `registration_init_time` (Date); `bd` limpo — valores ≤0 ou >100 viram `null` +
+    flag `bd_invalido` (bool), preservando o dado bruto de forma auditável; `gender`/`registered_via`
+    mantidos com nulls (tratamento fica pro gold).
+  - `silver/transactions`: `transaction_date`/`membership_expire_date` (Date); `is_auto_renew`/`is_cancel`
+    → bool; dedup de linhas exatamente duplicadas; ordenado por `msno`, `transaction_date`.
+  - `silver/user_logs`: `date` (Date); sanity check em `total_secs` — fora de `[0, 86400]` (mais que um
+    dia inteiro é fisicamente impossível) vira `null` + flag `total_secs_invalido`; dedup de `(msno, date)`.
+  - `silver/support_tickets`: `opened_at`/`resolved_at` (Date); passthrough do resto.
+
+  *Gold — `gold_account_activity`, 1 linha por conta:*
+  - **Cadastro:** `tem_cadastro` (bool), `faixa_etaria` (categoria, `bd_invalido`/null → "desconhecido"),
+    `gender` (categoria, null → "desconhecido"), `registered_via` (categoria, null → "desconhecido"),
+    `tenure_cadastro_dias` (até 28/fev/2017, mesma janela do rótulo de churn).
+  - **Billing:** `n_transacoes`, `auto_renew_ultima` (bool — sinal mais forte da EDA: 92,6% vs. 47,8%),
+    `desligou_auto_renovacao` (bool — transição 1→0, 8,6x mais comum em churn), `ja_cancelou` (bool),
+    `desconto_medio`, `plano_dias_ultimo`, `dias_desde_ultima_transacao`.
+  - **Uso:** `tem_uso_registrado` (bool), `total_secs_ultimo_mes`, `variacao_uso_mes` (log-ratio, sinal
+    fraco mas mantido), `tendencia_uso_3m` (log-ratio, últimos 3 meses), `meses_ativos`.
+  - **Suporte:** `n_tickets_total`, `n_tickets_ultimos_30d`.
+  - **Alvo:** `is_churn`.
+
 - Definir por escrito, antes de treinar qualquer modelo: métrica principal (recall a uma precisão mínima
   aceitável, calibrada depois de ver a distribuição real de churn da amostra), baseline mínimo, critério
   objetivo de "modelo pronto para produção", e o critério de amostragem (tamanho da amostra, estratégia de
