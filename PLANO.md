@@ -414,6 +414,39 @@ um público de negócio.
 documentada: cold start vs. tamanho de imagem/reprodutibilidade.
 - Testes automatizados do serviço de inferência: contrato de entrada/saída e casos de borda.
 
+**Status da Fase 2 (atualizado em 14/set/2026):**
+
+- ✅ **Modelo e metadados serializados** a partir do notebook (`joblib.dump` do XGBoost final +
+  `metadata.json` com listas de features/threshold/métricas) e enviados a um container novo, **`models`**,
+  no ADLS Gen2 — decisão de container dedicado em vez de misturar artefato de modelo com dado em `gold`.
+- ✅ **Serviço FastAPI implementado** em `src/account_health/` — `data/loader.py` (baixa `gold_account_activity.parquet`
+  via `azure-storage-file-datalake`), `models/loader.py` (baixa modelo + metadata do container `models`),
+  `service/main.py` (app FastAPI). Endpoint final: **`GET /predict/{msno}`** (parâmetro de caminho, não
+  query) — busca a conta na tabela `gold` carregada em memória no `lifespan` de startup, roda o modelo,
+  retorna `{msno, churn_probability, is_at_risk, threshold}`; `404` se a conta não existir na tabela.
+  `GET /health` simples pra liveness/readiness. Sem depender de banco relacional (consistente com o
+  abandono do Azure SQL Database na Fase 0).
+- ✅ **Testes automatizados** (`tests/test_service.py`, 3 casos: health, predict de conta existente,
+  predict de conta inexistente) usando `TestClient` do FastAPI com **mock** dos dois loaders
+  (`monkeypatch`) — testes não dependem de rede/credenciais Azure nem do modelo/dado reais, rodam
+  determinísticos e rápidos (~4s). `uv run pytest tests/ -v` — 3 passed.
+- **Bugs reais encontrados e corrigidos ao longo da implementação** (vale registrar, não é "código feio",
+  é o tipo de fricção real de colocar um serviço no ar):
+  - O pacote `account_health` foi instalado como editable **quando `src/account_health/` ainda estava
+    vazio** — o `uv` cacheou uma build sem nenhum módulo dentro, e adicionar arquivos depois não invalidou
+    esse cache sozinho (`uv sync` normal não percebeu). Fix: `uv sync --reinstall-package account-health-ml-service`.
+  - Variáveis em `~/.config/account-health-ml/secrets.env` escritas sem `export` — funcionavam com `az`
+    (que faz substituição de variável no próprio shell antes de rodar), mas não eram repassadas pro
+    processo filho do `uv run uvicorn`. Fix: adicionar `export` nas linhas do secrets.env.
+  - **Ordem de features trocada** entre o treino (`categóricas + booleanas + numéricas`, do notebook) e o
+    serviço (`categóricas + numéricas + booleanas`, erro de digitação) — XGBoost é estrito quanto a isso e
+    recusa rodar (`ValueError: feature_names mismatch`) em vez de silenciosamente dar resultado errado, o
+    que é uma proteção boa de se conhecer.
+  - Endpoint definido como `/predict/{msno}` (caminho) em vez do `/predict?msno=...` (query) inicialmente
+    proposto — precisa de URL-encoding manual dos caracteres especiais do `msno` (`+`→`%2B`, `=`→`%3D`) ao
+    testar via `curl`, já que `msno` são hashes base64.
+- ⬜ Deploy real do container (Dockerfile, ACR) — fica pra Fase 3, junto do AKS.
+
 ### Validação pré-Fase 3 (NOVA, 08/set/2026)
 
 Antes de prosseguir para o deploy em Kubernetes, aplicar um gate de qualidade equivalente ao da Fase 0 —
