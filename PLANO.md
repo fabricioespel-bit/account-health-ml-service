@@ -462,6 +462,67 @@ por escrito, checar:
 Só avançar para a Fase 3 depois desse checklist fechado — mesma disciplina da Fase 0, para não empurrar
 problema de empacotamento para dentro da complexidade adicional do Kubernetes.
 
+**Status da validação pré-Fase 3 (atualizado em 15/set/2026):**
+
+- ✅ `/health` e `/predict` respondendo — agora confirmado rodando de verdade num **container Linux no
+  Azure** (não só local), com resultado idêntico ao teste local (`churn_probability: 0.043` pra mesma
+  conta de teste).
+- ⚠️ Critério de F2≥0,65 — **não atingido** (F2=0,601 no teste), aceito conscientemente na Fase 1. Não
+  bloqueia a Fase 3 por decisão já registrada.
+- ✅ Imagem builda e roda sem depender de credencial/path só-local — confirmado.
+- ⬜ Secrets no Key Vault — ainda pendente (ver nota abaixo, ficou ainda mais claro que isso não é
+  "nice to have").
+
+**Saga real de colocar o serviço num container — vale documentar como aprendizado de portfólio:**
+
+1. **Docker Desktop incompatível com o macOS 12** desta máquina (exige macOS 14+). Tentativa de
+   alternativa via **Colima** (runtime leve baseado em Lima/QEMU) esbarrou num beco sem saída: o QEMU
+   11.1.1 exige Clang v10+/Xcode 15+ pra compilar, indisponível nesse macOS. **Decisão: abandonar Docker
+   local por completo** e buildar direto na nuvem via `az acr build` — mais realista (times de verdade
+   buildam em CI/nuvem) e contorna o problema de vez.
+2. **Bugs reais no Dockerfile, um de cada vez:**
+   - Faltava `README.md` no contexto de build — `hatchling` exige esse arquivo pra validar metadados do
+     pacote, e ele não tinha sido copiado (só `pyproject.toml`/`uv.lock`/`src/`).
+   - Faltava `libgomp1` (equivalente Linux do `libomp` que já tínhamos instalado via Homebrew no macOS pro
+     XGBoost) — adicionado ao `apt-get install`.
+   - Adicionado `ca-certificates` e `ENV PYTHONUNBUFFERED=1` como precaução/boa prática (não eram a causa
+     raiz do problema seguinte, mas ficam corretos no Dockerfile de qualquer forma).
+3. **Teste do container sem Docker local:** usado **Azure Container Instances (ACI)** como ambiente de
+   smoke-test descartável (`az container create`/`delete`) — sobe, testa via `curl`, apaga. Custo
+   irrisório por poucos minutos de uso.
+4. **`CrashLoopBackOff` com `ExitCode 3` e logs sempre vazios** (`az container logs` retornando `None`)
+   — o maior desafio de diagnóstico da sessão:
+   - `az container exec` interativo (`/bin/bash`) bateu num **bug real do Azure CLI**
+     (`RuntimeError: release unlocked lock`) quando rodado sem uma sessão de terminal totalmente
+     interativa — não é bug nosso, é limitação do ambiente de execução usado.
+   - Contornado com comandos de "tiro único" (`--exec-command "timeout 8 <comando>"`, sem pipes/redirects/
+     aspas aninhadas, que quebravam o parser do `az container exec`) — finalmente revelou o traceback
+     real: `azure.core.exceptions.ClientAuthenticationError` — assinatura MAC não bate ao baixar o
+     `gold_account_activity.parquet`.
+   - Descartadas por ordem: falta de memória (testado 1GB→2GB, mesmo erro), relógio do container
+     dessincronizado (`date -u` confirmou hora certa), chave de storage errada/desatualizada (testado com
+     chave nova recém-buscada, mesmo erro).
+   - **Causa raiz real:** `$AZURE_STORAGE_KEY` **não persiste entre comandos separados** nesta sessão de
+     terminal (mesmo padrão de "esqueceu de `source`" já visto várias vezes no projeto, mas dessa vez
+     mascarado porque o comando de criação do container "parecia" certo — só falhava silenciosamente ao
+     montar a variável). Confirmado definitivamente testando com `--environment-variables` não-secure
+     (não-criptografada) e inspecionando o JSON de retorno: primeira tentativa mostrou o valor **vazio**;
+     ao encadear busca da chave + delete + create **num único comando** (`VAR=$(...) && az container
+     delete ... && az container create ...`), o valor apareceu correto e o serviço subiu.
+   - **Lição pra qualquer sessão futura:** nunca depender de uma variável `export`ada num comando anterior
+     sobreviver pro próximo — sempre buscar/exportar e usar no mesmo bloco de comando encadeado com `&&`.
+5. **Limpeza de segurança:** como o diagnóstico final usou variável não-secure (expondo a chave em texto
+   plano na configuração do recurso), a chave da storage account foi **rotacionada**
+   (`az storage account keys renew`) logo depois, e o `secrets.env` local atualizado.
+6. **Container de teste (ACI) deletado** ao final, seguindo o princípio de não deixar recurso pago
+   rodando à toa entre sessões.
+7. Imagem final publicada em `acrhealthml2026fe.azurecr.io/account-health-ml-service:v1`, validada e
+   pronta pra ser referenciada nos manifests do AKS na Fase 3.
+
+**Conclusão prática:** esse debug reforça — não é só "nice to have" — a necessidade real do Key Vault +
+Workload Identity planejados pra Fase 3: variável de ambiente simples já se provou frágil mesmo num teste
+manual isolado; num cluster de produção de verdade, essa fragilidade seria inaceitável.
+
 ### Fase 3 — Deploy em Kubernetes no Azure (o gap-closing real)
 
 - Azure Kubernetes Service (AKS), preferencialmente em modo AKS Automatic (equivalente ao GKE
