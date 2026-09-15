@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: account-health-service
+  namespace: default
+  labels:
+    app: account-health-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: account-health-service
+  template:
+    metadata:
+      labels:
+        app: account-health-service
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: account-health-sa
+      containers:
+        - name: account-health-service
+          image: acrhealthml2026fe.azurecr.io/account-health-ml-service:v1
+          ports:
+            - containerPort: 8000
+          env:
+            - name: AZURE_STORAGE_ACCOUNT
+              value: "sahealthml2026fe"
+            - name: AZURE_STORAGE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: storage-key-secret
+                  key: AZURE_STORAGE_KEY
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: secrets-store-inline
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
+      volumes:
+        - name: secrets-store-inline
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: "account-health-kv"

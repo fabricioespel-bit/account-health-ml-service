@@ -543,6 +543,50 @@ do K8s".
   Automatizar o desligamento do cluster inteiro entre sessões de demonstração (ex.: `az aks stop` /
   `az aks start`, não só reduzir o node pool manualmente) — decisão definida já na Fase -1, aplicada aqui.
 
+**Status da Fase 3 (atualizado em 15/set/2026):**
+
+- ✅ **AKS Automatic não foi viável nessa assinatura** — decisão revisada em relação à Fase -1. Na época,
+  só validamos que o formulário do Portal abria sem aviso de indisponibilidade; a criação de verdade
+  esbarrou em duas camadas de restrição real: (1) quota de vCPU "Total Regional" limitada a 10 (padrão de
+  assinatura nova) — resolvida via cota self-service (sem chamado, ao contrário do caso do SQL Server);
+  (2) as famílias de VM com suporte a 3 zonas de disponibilidade que o AKS Automatic exige por design
+  (Dv5, DDv5, etc.) estavam **indisponíveis nessa assinatura/região** (não só cota zero — "Unavailable in
+  this region"), sem alternativa self-service. **Ativado o fallback já documentado desde a Fase -1: AKS
+  padrão + cluster autoscaler**, usando `Standard_D4s_v7` (família com cota confirmada e presente na
+  lista de VMs permitidas pelo AKS nessa assinatura — descoberta via o próprio erro do `az aks create`,
+  que lista as VMs válidas). Cluster `aks-account-health`, `sku: Base, tier: Free`, autoscaler 1-2 nós.
+- ✅ **Imagem publicada no ACR** (`acrhealthml2026fe.azurecr.io/account-health-ml-service:v1`, validada
+  na Fase 2) — cluster já criado com `--attach-acr` pra permissão de pull automática, sem role assignment
+  manual.
+- ✅ **Key Vault + Azure AD Workload Identity implementado de ponta a ponta** (não ficou só documentado —
+  funcionou de primeira na primeira tentativa real de deploy):
+  - Key Vault `kv-healthml2026fe` (RBAC habilitado) guardando a chave da storage account como secret
+    (`storage-account-key`).
+  - OIDC Issuer + Workload Identity habilitados no cluster existente (`az aks update
+    --enable-oidc-issuer --enable-workload-identity`) e o addon do driver CSI do Key Vault
+    (`azure-keyvault-secrets-provider`).
+  - Identidade gerenciada dedicada (`id-account-health`) com role `Key Vault Secrets User` sobre o vault,
+    federada com um `ServiceAccount` do Kubernetes (`account-health-sa`) via credencial federada
+    (`az identity federated-credential create`, ligando o OIDC Issuer do cluster ao subject
+    `system:serviceaccount:default:account-health-sa`).
+  - `SecretProviderClass` com `secretObjects` sincronizando o secret do Key Vault pra um Secret nativo do
+    Kubernetes (`storage-key-secret`) — decisão de design: o app **não precisou de nenhuma mudança de
+    código**, continua lendo `AZURE_STORAGE_KEY` via `os.environ` normalmente, só que agora a origem do
+    valor é o Key Vault via `secretKeyRef`, não mais uma variável de ambiente solta.
+- ✅ **Manifests do Kubernetes** em `infra/k8s/` (`deployment.yaml`, `service.yaml`, `hpa.yaml`):
+  Deployment com `azure.workload.identity/use: "true"`, resource requests/limits (512Mi/250m request,
+  1Gi/500m limit — calibrado pelo teste de memória do ACI na Fase 2), readiness/liveness probes em
+  `/health`; Service tipo `LoadBalancer` (IP público via Azure Load Balancer); HPA 1-3 réplicas por CPU
+  (70% de utilização).
+- ✅ **Deploy validado end-to-end**: pod `Ready` na primeira tentativa, `/health` e `/predict` respondendo
+  via o IP público do Service, com resultado **idêntico** ao teste local e ao teste no ACI da Fase 2
+  (`churn_probability: 0,043` pra mesma conta de teste) — confirma que a cadeia completa (AKS → Workload
+  Identity → Key Vault → ADLS Gen2) funciona de ponta a ponta sem nenhuma cópia de credencial em texto
+  plano em lugar nenhum do cluster.
+- ⬜ Ainda pendente: aplicar o mecanismo de desligamento de custo (`az aks stop` entre sessões), e
+  documentar por que AKS em vez de Container Apps (item já no plano original, ainda não escrito no
+  README).
+
 ### Fase 4 — Monitoramento e detecção de drift
 
 - **Revisado 11/set/2026:** logging estruturado de predições em **Azure Table Storage** (mesma storage
@@ -591,9 +635,15 @@ de verdade.
   — ainda genuinamente "Azure", só não a peça específica do Synapse.
 - Trade-off de custo: gestão do node pool do AKS entre sessões de uso (reduzir/desligar quando não estiver
 ativamente demonstrando o projeto) — mecanismo automatizado, não dependência de lembrar manualmente.
-- **(Novo)** Resultado da validação de AKS Automatic feita na Fase -1: **disponível** para a assinatura na
-  região East US (validado em 09/set/2026 pelo Portal) — decisão de seguir com AKS Automatic, sem
-  necessidade do fallback padrão. Detalhe completo do teste na seção 3 (Fase -1, status).
+- **(Revisado, 15/set/2026)** Resultado da validação de AKS Automatic feita na Fase -1: aparecia
+  **disponível** no formulário do Portal em 09/set/2026, mas a criação real (Fase 3) revelou duas
+  restrições que o formulário não expunha: quota de vCPU regional em 10 (resolvida via cota self-service)
+  e as famílias de VM com suporte a 3 zonas de disponibilidade **indisponíveis** para essa assinatura
+  nessa região (não contornável por cota). **Decisão final: usar o fallback já previsto desde a Fase -1**
+  — AKS padrão + cluster autoscaler, com `Standard_D4s_v7`. Lição: validar disponibilidade de um recurso
+  Azure pelo formulário do Portal não garante que a criação de fato funcione — só a tentativa real revela
+  restrições de quota/disponibilidade específicas da assinatura. Detalhe completo na seção 3 (Fase 3,
+  status).
 - **(Novo, 08/set/2026)** Por que KKBox (dado real de uso+billing) combinado com suporte sintético
   correlacionado, em vez de 100% sintético ou tentar forçar dois datasets reais sem `account_id` em comum
   — lacuna real de dado público disponível, documentada explicitamente, não escondida.
