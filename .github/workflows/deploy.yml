@@ -1,0 +1,48 @@
+name: Deploy to AKS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/deploy.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ACR_NAME: acrhealthml2026fe
+  RESOURCE_GROUP: rg-account-health-ml
+  AKS_CLUSTER: aks-account-health
+  IMAGE_NAME: account-health-ml-service
+  DEPLOYMENT_NAME: account-health-service
+  CONTAINER_NAME: account-health-service
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image
+        run: az acr build --registry $ACR_NAME --image $IMAGE_NAME:${{ github.sha }} .
+
+      - name: Get AKS credentials
+        run: az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_CLUSTER --overwrite-existing
+
+      - name: Deploy new image
+        run: |
+          kubectl set image deployment/$DEPLOYMENT_NAME $CONTAINER_NAME=$ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }}
+          kubectl rollout status deployment/$DEPLOYMENT_NAME
