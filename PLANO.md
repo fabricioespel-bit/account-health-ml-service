@@ -597,6 +597,30 @@ do K8s".
 GCP.
 - Checagem simples de drift de dados (distribuição de features ao longo do tempo, lendo os Parquets do
   `gold` com Polars em vez de query SQL), com critério documentado de quando um alerta dispararia.
+- **(Decidido, 16/set/2026) Escopo da checagem de drift — data drift via PSI, não concept drift:**
+  existem três tipos de drift relevantes em produção — *data drift* (distribuição das features de entrada
+  muda), *concept drift* (a relação entre feature e rótulo muda) e *prediction drift* (a distribuição das
+  saídas do modelo muda). Concept drift é o sinal mais direto de degradação real, mas exige rótulo
+  verdadeiro (aqui, saber se a conta de fato renovou ou não) — no KKBox isso equivaleria a esperar o
+  fechamento de um novo ciclo de cobrança, o que não existe neste dataset histórico estático. Decisão:
+  implementar apenas **data drift** nesta fase, via **PSI (Population Stability Index)** por feature,
+  comparando duas cohortes reais de tempo dentro do próprio KKBox (não duas amostras idênticas nem dado
+  sintético perturbado) — ver metodologia abaixo. Cortes de PSI usados (padrão de mercado, não arbitrário):
+  <0,1 sem mudança significativa; 0,1–0,25 mudança moderada; >0,25 alerta.
+  **Nota para produção real (não implementada aqui, só documentada por rigor):** o desenho maduro seria em
+  camadas — prediction drift e data drift rodando com frequência alta como sinais antecipados (não exigem
+  rótulo), e concept drift rodando sempre que o rótulo real ficasse disponível (aqui, mensalmente, no
+  fechamento de cada ciclo de cobrança) como confirmação definitiva dos alertas antecipados. A escolha de
+  quanto pesar cada camada depende da latência do rótulo e do custo do erro do negócio, não é uma regra fixa
+  de ML — este projeto usa a camada mais simples (data drift) por ser a única viável sem simular rótulo
+  futuro de forma artificial.
+- **(Decidido, 16/set/2026) Metodologia da checagem — Opção A (cohortes reais), não simulação sintética:**
+  em vez de perturbar artificialmente uma cópia da `gold` pra forçar um drift fake, a checagem compara duas
+  cohortes reais de contas dentro do próprio KKBox (ex.: contas por período real de última transação/
+  atividade) — o resultado, se houver drift, é um achado genuíno do dado, não um exercício vazio contra o
+  próprio dado espelhado nem um drift fabricado. Mesmo princípio já aplicado no projeto (preferir dado real
+  mesmo quando mais trabalhoso, reservar sintético só para lacunas sem alternativa — ver decisão dos tickets
+  de suporte).
 
 ### Fase 5 (stretch, só se sobrar tempo) — CI/CD
 
