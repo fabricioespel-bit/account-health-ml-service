@@ -123,6 +123,21 @@ Detalhe completo em `PLANO.md`, seção 4.
 - Detalhe completo (incluindo o desenho de produção em camadas — prediction drift e data drift como sinais
   antecipados, concept drift como confirmação quando o rótulo chega) em `PLANO.md`, seção "Fase 4".
 
+## CI/CD (Fase 5)
+
+Pipeline em `.github/workflows/deploy.yml`, disparado a cada push na `main` que toque em código/imagem
+(`src/`, `Dockerfile`, `pyproject.toml`, `uv.lock`) — commits só de documentação não disparam deploy.
+
+- **Autenticação via OIDC federado** com uma Managed Identity dedicada (`id-github-actions-cicd`), separada
+  da identidade de runtime do pod — sem nenhum secret de longa duração armazenado no GitHub.
+- **Tag da imagem = hash do commit** (`${{ github.sha }}`), não uma tag fixa — cada deploy é rastreável até
+  o commit exato, e o Kubernetes de fato percebe que há imagem nova.
+- Dois bugs reais resolvidos durante a validação: o `subject` da federação OIDC precisou usar o formato com
+  IDs numéricos imutáveis (customização de segurança do GitHub, não o formato "padrão" da documentação da
+  Microsoft), e a role `AcrPush` sozinha não é suficiente pro `az acr build` (que aciona uma tarefa de build
+  no plano de controle do ACR, não só push/pull de imagem) — precisou de `Contributor` escopado só ao ACR.
+  Detalhe completo em `PLANO.md`, seção "Fase 5".
+
 ## Setup e execução
 
 ```bash

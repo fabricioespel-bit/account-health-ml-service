@@ -663,6 +663,27 @@ GCP.
 
 - GitHub Actions: build da imagem, push para o ACR, deploy no AKS.
 - Reforça rigor de engenharia, mas não é bloqueante para considerar o projeto "pronto".
+- **(Implementado e validado, 16/set/2026):** workflow em `.github/workflows/deploy.yml`, disparado em push
+  na `main` (filtrado por `paths` que afetam a imagem, pra não disparar deploy em commits só de
+  documentação). Autenticação via **federação OIDC** com uma **Managed Identity dedicada**
+  (`id-github-actions-cicd`, separada da identidade de runtime do pod — princípio de menor privilégio).
+  Cada build usa o **hash do commit** como tag da imagem (`${{ github.sha }}`), em vez de uma tag fixa —
+  necessário pro Kubernetes de fato perceber que há imagem nova a cada deploy.
+  - **Bug real #1 — formato do `subject` do OIDC:** a primeira tentativa falhou com
+    `AADSTS700213: No matching federated identity record found`. O `subject` configurado na Azure seguia o
+    formato "padrão" da documentação (`repo:usuario/repo:ref:refs/heads/main`), mas o token real emitido
+    pelo GitHub usava `repo:usuario@<id-numerico>/repo@<id-numerico>:ref:refs/heads/main` — a conta tem
+    habilitada a customização do GitHub que usa o **ID imutável** do usuário/repositório em vez do nome
+    (proteção contra federação quebrar se a conta/repo for renomeado). Corrigido com
+    `az identity federated-credential update`, usando o `subject` exato do erro retornado.
+  - **Bug real #2 — `AcrPush` insuficiente pro `az acr build`:** com a federação já funcionando, o passo de
+    build falhou com "recurso não encontrado" pro ACR — mensagem enganosa, já que o recurso existia. Causa
+    real: `AcrPush` cobre só o plano de dados (pull/push de imagem), mas `az acr build` aciona uma **tarefa
+    de build no ACR** (`scheduleRun`), uma operação de plano de controle que a role não cobre. Corrigido
+    concedendo `Contributor` **escopado só a esse ACR específico** (não ao grupo de recursos inteiro).
+  - **Resultado:** pipeline validado de ponta a ponta — push → build → publish no ACR → `kubectl set image`
+    → rollout no AKS, confirmado com `kubectl get deployment` mostrando a tag = hash do commit exato que
+    disparou o run, e o serviço respondendo normalmente depois do rollout.
 
 ## 4. Decisões de arquitetura a documentar
 
