@@ -1,13 +1,17 @@
+import sys  
 from datetime import date, timedelta
 import polars as pl
 
-REF_DATE = date(2017, 2, 28) # mesma janela de referencia do churn
+REF_DATE = date.fromisoformat(sys.argv[1]) if len(sys.argv) > 1 else date(2017, 2, 28) # mesma janela de referencia do churn
 
 labels = pl.read_parquet("data/processed/silver/churn_labels.parquet")
 members = pl.read_parquet("data/processed/silver/members.parquet")
 tx = pl.read_parquet("data/processed/silver/transactions.parquet")
 logs = pl.read_parquet("data/processed/silver/user_logs.parquet")
 tickets = pl.read_parquet("data/processed/silver/support_tickets.parquet")
+tx = tx.filter(pl.col("transaction_date") <= REF_DATE)
+logs = logs.filter(pl.col("date") <= REF_DATE)
+tickets = tickets.filter(pl.col("opened_at") <= REF_DATE)
 
 # --- Cadastro ---
 members_feat = members.select(
@@ -86,7 +90,12 @@ gold = gold.with_columns(
     pl.col("n_tickets_ultimos_30d").fill_null(0),
 )
 
-gold.write_parquet("data/processed/gold/gold_account_activity.parquet", compression="zstd")
+if len(sys.argv) > 1:
+    output_path = f"data/processed/gold/gold_account_activity_{REF_DATE.isoformat()}.parquet"
+else:
+    output_path = "data/processed/gold/gold_account_activity.parquet"
+    
+gold.write_parquet(output_path, compression="zstd")
 
 print(f"Gold criado: {gold.height} linhas, {gold.width} colunas")
 print(f"Distribuição de churn: {gold['is_churn'].mean():.1%}")

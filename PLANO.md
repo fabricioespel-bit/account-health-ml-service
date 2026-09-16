@@ -621,6 +621,28 @@ GCP.
   próprio dado espelhado nem um drift fabricado. Mesmo princípio já aplicado no projeto (preferir dado real
   mesmo quando mais trabalhoso, reservar sintético só para lacunas sem alternativa — ver decisão dos tickets
   de suporte).
+- **(Implementado, 16/set/2026) Método final e resultado da checagem de drift:** em vez de dividir uma
+  única foto da `gold` por recência de conta (a ideia genérica do item anterior), o método escolhido foi
+  **parametrizar o `REF_DATE`** de `scripts/10_build_gold.py` (antes fixo em código) e rodar o pipeline
+  duas vezes — uma na data de produção (2017-02-28) e outra 3 meses antes (2016-11-30) — gerando duas fotos
+  reais do mesmo pipeline em momentos diferentes. Isso reproduz de forma mais fiel o que aconteceria numa
+  checagem de produção de verdade (mesmo código, dias diferentes) do que uma simples divisão de cohortes
+  dentro de uma foto só.
+  - **Bug real encontrado e corrigido durante a implementação:** a primeira versão do script parametrizado
+    usava `REF_DATE` só para calcular diferenças de dias (`dias_desde_ultima_transacao`, janela de tickets),
+    mas nunca filtrava as tabelas de origem (`transactions`, `user_logs`, `support_tickets`) para excluir
+    registros posteriores ao `REF_DATE` — ou seja, a "foto" de nov/2016 enxergava transações e uso de
+    dez/2016 a fev/2017, um vazamento real de dado do futuro. Sintoma que expôs o bug: as duas fotos geraram
+    contagens de nulo **idênticas**, o que não deveria acontecer entre dois momentos diferentes. Corrigido
+    filtrando cada tabela pelo seu campo de data (`<= REF_DATE`) antes de agregar.
+  - **Resultado do PSI, após o fix:** das 11 features numéricas do modelo, 10 ficaram dentro do normal
+    (PSI < 0,1). Uma, `meses_ativos`, deu PSI = 0,660 (zona de alerta) — mas investigação mostrou ser
+    **falso positivo estrutural**, não drift de comportamento: `meses_ativos` é uma contagem cumulativa
+    desde jan/2015, então seu teto cresce mecanicamente conforme o `REF_DATE` avança (máximo de 23 meses em
+    nov/2016 vs. 26 em fev/2017) — qualquer comparação de PSI entre janelas de calendário de tamanhos
+    diferentes vai acusar "drift" nessa feature mesmo sem nenhuma mudança real de comportamento. Lição
+    documentada: features de contagem cumulativa/lifetime não são boas candidatas a checagem de PSI entre
+    janelas de referência diferentes, a menos que normalizadas (ex.: meses ativos ÷ meses desde o cadastro).
 
 ### Fase 5 (stretch, só se sobrar tempo) — CI/CD
 
