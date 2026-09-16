@@ -643,6 +643,21 @@ GCP.
     diferentes vai acusar "drift" nessa feature mesmo sem nenhuma mudança real de comportamento. Lição
     documentada: features de contagem cumulativa/lifetime não são boas candidatas a checagem de PSI entre
     janelas de referência diferentes, a menos que normalizadas (ex.: meses ativos ÷ meses desde o cadastro).
+- **(Implementado e validado, 16/set/2026) Azure Monitor / Log Analytics no AKS:** addon de monitoramento
+  habilitado no cluster existente (`az aks enable-addons --addon monitoring`), criando/conectando um Log
+  Analytics Workspace automaticamente. Validado com uma consulta KQL real via
+  `az monitor log-analytics query`, retornando as linhas de log reais do `uvicorn` do pod (incluindo a
+  chamada de `/predict` de teste e as chamadas periódicas de `/health` do `readinessProbe`).
+  - **Obstáculo real encontrado durante a validação:** ao reativar o cluster (`az aks start`, parado desde
+    o fim da Fase 3), o pod da aplicação estava em `ImagePullBackOff` — o ACR (`acrhealthml2026fe`) tinha
+    sido **deletado** de propósito ao fim da sessão anterior (princípio de recurso efêmero), então a imagem
+    referenciada pelo `deployment.yaml` não existia mais. Corrigido recriando o ACR do zero (mesmo nome,
+    pra não editar manifest), rebuildando a imagem (`az acr build`) e reconectando a permissão de pull ao
+    cluster já existente via `az aks update --attach-acr` (diferente do `--attach-acr` usado na criação
+    original do cluster — aqui é o comando pra um cluster já existente). Depois de `kubectl delete pod`
+    (pra forçar nova tentativa), o pod subiu normalmente. Lição prática: o ciclo de "recurso efêmero" da
+    Fase 3 (aks stop + ACR deletado) precisa desse procedimento de reconstrução do ACR sempre que o
+    cluster for reativado — não é só dar `aks start`.
 
 ### Fase 5 (stretch, só se sobrar tempo) — CI/CD
 

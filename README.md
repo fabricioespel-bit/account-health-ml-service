@@ -114,6 +114,12 @@ Detalhe completo em `PLANO.md`, seção 4.
   é uma contagem cumulativa desde o início do histórico, então seu teto cresce mecanicamente conforme o
   `REF_DATE` avança, não por mudança real de comportamento. Lição: features de contagem cumulativa/lifetime
   não são boas candidatas a comparação de PSI entre janelas de calendário de tamanhos diferentes.
+- **Azure Monitor / Log Analytics** — addon de monitoramento habilitado no AKS
+  (`az aks enable-addons --addon monitoring`), validado com uma consulta KQL real trazendo os logs de
+  aplicação do `uvicorn` (incluindo chamadas de teste a `/predict` e `/health`). Obstáculo real encontrado
+  ao reativar o cluster após a pausa entre sessões: o ACR tinha sido deletado de propósito (recurso
+  efêmero), quebrando o pull da imagem (`ImagePullBackOff`) — corrigido recriando o ACR, rebuildando a
+  imagem e reconectando a permissão via `az aks update --attach-acr`.
 - Detalhe completo (incluindo o desenho de produção em camadas — prediction drift e data drift como sinais
   antecipados, concept drift como confirmação quando o rótulo chega) em `PLANO.md`, seção "Fase 4".
 
