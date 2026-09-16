@@ -751,12 +751,16 @@ ativamente demonstrando o projeto) — mecanismo automatizado, não dependência
 
 ## 5. Critério de conclusão
 
-- Modelo supera o baseline heurístico em recall, à precisão mínima definida na Fase 0.
-- Serviço de inferência deployado e respondendo em produção real no AKS — não só localmente.
-- README documenta as decisões da seção 4, incluindo explicitamente por que Azure foi escolhido para este
+- ✅ Modelo supera o baseline heurístico em recall, à precisão mínima definida na Fase 0 (F2 0,601 vs. 0,494
+  do baseline).
+- ✅ Serviço de inferência deployado e respondendo em produção real no AKS — não só localmente.
+- ✅ README documenta as decisões da seção 4, incluindo explicitamente por que Azure foi escolhido para este
 projeto.
-- (Opcional, desejável) Post de LinkedIn no formato dos posts 3–5, com achado técnico real — por exemplo,
-comparando na prática AKS Automatic vs. GKE Autopilot, ou o trade-off de custo real do node pool.
+- ⬜ (Opcional, desejável) Post de LinkedIn no formato dos posts 3–5, com achado técnico real — por exemplo,
+comparando na prática AKS Automatic vs. GKE Autopilot, ou o trade-off de custo real do node pool. Ainda em
+aberto, não bloqueia o fechamento do plano.
+
+**Todos os critérios obrigatórios atendidos em 16/set/2026 — projeto fechado, ver seção 7.**
 
 ## 6. Estimativa de esforço (referência, não deadline)
 
@@ -773,15 +777,25 @@ majoritariamente Python/SQL.
 simplificado (gap técnico a mais, de propósito). O prazo de 15/09/2026 (saída da Hagens) não é mais um
 limitador — prioridade é o aprendizado e a qualidade de cada etapa.
 
-## 7. Próximos passos imediatos (atualizado, 11/set/2026)
+## 7. Status final (fechado em 16/set/2026)
 
-- ✅ Fase -1 completa (Azure, Kaggle, AKS Automatic validado, ADLS Gen2 — Synapse removido do escopo).
-- ✅ Fase 0 quase completa: ingestão bronze, EDA de uso e billing, definição de sucesso — tudo feito.
-- **Pendente na Fase 0:** escrever os scripts locais de transformação silver (tipagem/dedup dos arquivos
-  do `bronze`) e consolidação gold (`gold_account_activity`), e subir os Parquets resultantes pro ADLS
-  Gen2 — substitui o que seria feito via Synapse Serverless (abandonado, ver seção 4).
-- Depois disso: Fase 1 (baseline heurístico já calculado — F2=0,494 — mais os modelos de ML clássico:
-  Logistic Regression, XGBoost/LightGBM, avaliação com PR-AUC/F2 contra a meta de F2≥0,65).
+Todas as fases planejadas foram concluídas:
+
+- ✅ Fase -1 — validações pré-projeto (Azure, Kaggle, ADLS Gen2).
+- ✅ Fase 0 — ingestão bronze/silver/gold, EDA, definição de sucesso.
+- ✅ Fase 1 — modelagem (Logistic Regression, XGBoost ajustado, F2 0,601 vs. baseline 0,494).
+- ✅ Fase 2 — serviço FastAPI local, testado.
+- ✅ Fase 3 — containerização e deploy real em AKS, com Key Vault + Workload Identity.
+- ✅ Fase 4 — logging de predições, checagem de drift (PSI) e Azure Monitor/Log Analytics.
+- ✅ Fase 5 (stretch) — CI/CD via GitHub Actions, validado de ponta a ponta.
+
+Recursos custados (AKS, ACR) desligados/deletados ao fim da sessão de 16/set/2026, seguindo o princípio de
+recurso efêmero (ver `feedback_hands_on_execution.md`). Pra reativar pra uma demo/entrevista: `az aks start`
++ recriar o ACR + `az acr build` + `az aks update --attach-acr` (procedimento completo documentado na seção
+"Fase 4", bloco de Azure Monitor).
+
+Único item opcional em aberto: o post de LinkedIn (seção 5). Não há mais trabalho de engenharia pendente
+no escopo original deste plano.
 
 **Ideia para depois (fora de escopo agora):** se este projeto validar bem a experiência em Azure, um
 segundo projeto natural seria replicar parte do RAG/agentes do amigurumi-agent usando Azure OpenAI +
