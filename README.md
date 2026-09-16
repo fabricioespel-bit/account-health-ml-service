@@ -42,9 +42,11 @@ ADLS Gen2 — gold    (gold_account_activity.parquet — 1 linha por conta, feat
    │
    ▼
 FastAPI (/health, /predict/{msno}) ──► AKS (Deployment + Service LoadBalancer + HPA)
-   │
+   │                                        │
+   │                                        ▼
+   │                            Key Vault ──► Workload Identity federada ──► ServiceAccount do pod
    ▼
-Key Vault (chave da storage account) ──► Workload Identity federada ──► ServiceAccount do pod
+Azure Table Storage (predictionlogs) ──► scripts/11_check_drift.py (PSI entre duas fotos da gold)
 ```
 
 **Decisão importante revisada em produção:** o plano original usava Azure Synapse Serverless SQL para as
@@ -89,6 +91,32 @@ Detalhe completo em `PLANO.md`, seção 4.
   Kubernetes via identidade federada (OIDC), e o serviço lê a variável de ambiente normalmente — zero
   mudança de código pra ganhar gestão de secret de verdade.
 
+## Monitoramento e detecção de drift (Fase 4)
+
+- **Logging de predições** — cada chamada a `/predict` grava uma entidade em **Azure Table Storage**
+  (tabela `predictionlogs`, mesma storage account do data lake — sem depender de SQL Server, ver decisão
+  de abandono do Synapse acima). Gravação *best-effort*: uma falha no log não derruba a resposta de
+  predição, já que é um efeito colateral auxiliar, não o propósito do endpoint.
+- **Checagem de drift — apenas data drift, não concept drift, por decisão consciente:** existem três tipos
+  de drift relevantes em produção (*data drift*, *concept drift*, *prediction drift*). Concept drift exige
+  rótulo real (saber se a conta de fato renovou), o que neste dataset histórico estático equivaleria a
+  esperar o fechamento de um novo ciclo de cobrança — inviável aqui. Implementado apenas **data drift**, via
+  **PSI (Population Stability Index)** por feature numérica.
+- **Metodologia:** em vez de simular drift sinteticamente, o `REF_DATE` de `scripts/10_build_gold.py` foi
+  parametrizado para gerar **duas fotos reais do mesmo pipeline** em datas diferentes (2017-02-28 e
+  2016-11-30, 3 meses antes) — `scripts/11_check_drift.py` compara o PSI entre elas.
+- **Bug real encontrado durante a implementação:** a primeira versão não filtrava as tabelas de origem por
+  `REF_DATE`, causando vazamento de dado do futuro na foto de referência (sintoma: contagem de nulos
+  idêntica entre as duas fotos, o que não deveria acontecer). Corrigido filtrando cada tabela pelo seu
+  campo de data antes de agregar.
+- **Resultado:** das 11 features numéricas do modelo, 10 ficaram dentro do normal (PSI < 0,1). Uma,
+  `meses_ativos`, deu PSI = 0,660 (zona de alerta) — investigação mostrou ser **falso positivo estrutural**:
+  é uma contagem cumulativa desde o início do histórico, então seu teto cresce mecanicamente conforme o
+  `REF_DATE` avança, não por mudança real de comportamento. Lição: features de contagem cumulativa/lifetime
+  não são boas candidatas a comparação de PSI entre janelas de calendário de tamanhos diferentes.
+- Detalhe completo (incluindo o desenho de produção em camadas — prediction drift e data drift como sinais
+  antecipados, concept drift como confirmação quando o rótulo chega) em `PLANO.md`, seção "Fase 4".
+
 ## Setup e execução
 
 ```bash
@@ -107,7 +135,7 @@ uv run python scripts/06_eda.py                    # EDA de uso
 uv run python scripts/07_eda_billing.py            # EDA de billing
 uv run python scripts/08_baseline_billing.py       # baseline heurístico
 uv run python scripts/09_transform_silver.py       # bronze -> silver (local, Polars)
-uv run python scripts/10_build_gold.py             # silver -> gold
+uv run python scripts/10_build_gold.py             # silver -> gold (produção, REF_DATE padrão)
 ```
 
 Cada script lê de `data/raw/` (baixado do Kaggle) e escreve em `data/processed/`; o upload pro ADLS Gen2
@@ -132,25 +160,36 @@ uv run uvicorn account_health.service.main:app --reload --port 8000
 uv run pytest tests/ -v
 ```
 
+### Fase 4 — checagem de drift
+
+```bash
+uv run python scripts/10_build_gold.py 2016-11-30   # gera a foto de referência (3 meses antes)
+uv run python scripts/11_check_drift.py             # compara PSI entre as duas fotos
+```
+
 ### Deploy (Fase 3)
 
 ```bash
 az acr build --registry acrhealthml2026fe --image account-health-ml-service:v1 .
+kubectl apply -f infra/k8s/serviceaccount.yaml -f infra/k8s/secretproviderclass.yaml
 kubectl apply -f infra/k8s/deployment.yaml -f infra/k8s/service.yaml -f infra/k8s/hpa.yaml
 ```
 
-(Requer o cluster AKS, Key Vault, identidade federada e ServiceAccount já provisionados — ver `PLANO.md`
+(Requer o cluster AKS, Key Vault e identidade gerenciada federada já provisionados — ver `PLANO.md`
 seção "Fase 3" para o setup completo do zero.)
 
 ## Estrutura
 
 ```
 scripts/                 # Fase 0 — amostragem, filtro, EDA, transformação silver/gold
+                          # Fase 4 — 11_check_drift.py (checagem de drift via PSI)
 notebooks/                # Fase 1 — modelagem (notebook estruturado)
 src/account_health/
   data/loader.py          # Fase 2 — carrega a tabela gold do ADLS Gen2
   models/loader.py        # Fase 2 — carrega o modelo + metadata do ADLS Gen2
   service/main.py          # Fase 2 — FastAPI (/health, /predict/{msno})
-infra/k8s/                # Fase 3 — manifests AKS (Deployment, Service, HPA)
+                          # Fase 4 — log_prediction() grava em Azure Table Storage
+infra/k8s/                # Fase 3 — manifests AKS (ServiceAccount, SecretProviderClass,
+                          #          Deployment, Service, HPA)
 tests/                    # testes automatizados do serviço (mock dos loaders)
 ```
