@@ -25,6 +25,19 @@ class FakeModel:
         return np.array([[0.9, 0.1]] * len(X))
 
 
+class FakeTableClient:
+    def create_entity(self, entity):
+        pass
+
+
+class FakeTableServiceClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def get_table_client(self, name):
+        return FakeTableClient()
+
+
 def _fake_gold() -> pl.DataFrame:
     row = {"msno": "conta_teste"}
     for col in FAKE_METADATA["features_categoricas"]:
@@ -38,8 +51,11 @@ def _fake_gold() -> pl.DataFrame:
 
 @pytest.fixture
 def client(monkeypatch):
+    monkeypatch.setenv("AZURE_STORAGE_ACCOUNT", "fake-account")
+    monkeypatch.setenv("AZURE_STORAGE_KEY", "fake-key")
     monkeypatch.setattr(main, "load_gold_table", lambda: _fake_gold())
     monkeypatch.setattr(main, "load_model_and_metadata", lambda: (FakeModel(), FAKE_METADATA))
+    monkeypatch.setattr(main, "TableServiceClient", FakeTableServiceClient)
 
     with TestClient(main.app) as test_client:
         yield test_client

@@ -16,6 +16,7 @@ dependencies = [
     "pandas>=3.0.5",
     "fastapi>=0.141.1",
     "uvicorn>=0.53.0",
+    "azure-data-tables>=12.7.0",
 ]
 
 [dependency-groups]
