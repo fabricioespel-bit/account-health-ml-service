@@ -2,6 +2,7 @@ import os
 
 from contextlib import asynccontextmanager
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 
 from account_health.data.loader import load_gold_table
@@ -74,6 +75,30 @@ def predict(msno: str):
         "is_at_risk": proba >= threshold,
         "threshold": threshold,
     }
+
+ACCOUNT_CONTEXT_FIELDS = [
+    "tem_cadastro", "faixa_etaria", "gender", "registered_via",
+    "tenure_cadastro_dias", "n_transacoes", "auto_renew_ultima",
+    "desligou_auto_renovacao", "ja_cancelou", "desconto_medio",
+    "plano_dias_ultimo", "dias_desde_ultima_transacao", "tem_uso_registrado",
+    "total_secs_ultimo_mes", "variacao_uso_mes", "tendencia_uso_3m",
+    "meses_ativos", "n_tickets_total", "n_tickets_ultimos_30d",
+]  # is_churn deliberadamente fora — é o rótulo que o /predict existe pra estimar;
+   # devolvê-lo aqui seria vazamento de informação pro agente
+
+@app.get("/account/{msno}")
+def account(msno: str):
+    gold = state["gold"]
+    if msno not in gold.index:
+        raise HTTPException(status_code=404, detail=f"Conta {msno} não encontrada.")
+
+    row = gold.loc[msno, ACCOUNT_CONTEXT_FIELDS]
+    payload = {
+        k: (None if pd.isna(v) else (v.item() if hasattr(v, "item") else v))
+        for k, v in row.items()
+    }
+    payload["msno"] = msno
+    return payload
 
 def log_prediction(msno: str, churn_probability: float, model_version: str, threshold: float):
     table_client = state["table_client"] #inicializado no lifespan, igual ao model/gold
