@@ -46,7 +46,12 @@ def _fake_gold() -> pl.DataFrame:
         row[col] = 0.0
     for col in FAKE_METADATA["features_numericas"]:
         row[col] = 0.0
-    return pl.DataFrame([row])
+
+    row_com_nulo = dict(row)
+    row_com_nulo["msno"] = "conta_com_campo_nulo"
+    row_com_nulo["dias_desde_ultima_transacao"] = None
+
+    return pl.DataFrame([row, row_com_nulo])
 
 
 @pytest.fixture
@@ -80,3 +85,23 @@ def test_predict_conta_existente(client):
 def test_predict_conta_inexistente(client):
     response = client.get("/predict/conta_que_nao_existe")
     assert response.status_code == 404
+
+
+def test_account_conta_existente(client):
+    response = client.get("/account/conta_teste")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["msno"] == "conta_teste"
+    assert "is_churn" not in body
+
+
+def test_account_conta_inexistente(client):
+    response = client.get("/account/conta_que_nao_existe")
+    assert response.status_code == 404
+
+
+def test_account_conta_com_campo_nulo(client):
+    response = client.get("/account/conta_com_campo_nulo")
+    assert response.status_code == 200
+    assert "NaN" not in response.text
+    assert response.json()["dias_desde_ultima_transacao"] is None
